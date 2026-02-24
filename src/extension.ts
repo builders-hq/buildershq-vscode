@@ -126,7 +126,7 @@ function initClaudeCodeTracking(
   isPaused: boolean,
 ): void {
   const config = vscode.workspace.getConfiguration('weekendmode');
-  if (!config.get<boolean>('claudeCode.enabled', false)) {
+  if (!config.get<boolean>('claudeCode.enabled', true)) {
     return;
   }
 
@@ -137,6 +137,8 @@ function initClaudeCodeTracking(
     for (const event of events) {
       heartbeatService!.setActivity(event);
     }
+    // Claude activity counts as user presence — keep status active
+    presenceTracker!.recordExternalActivity('task_start', false);
     heartbeatService!.flushActivity();
   });
 
@@ -151,7 +153,7 @@ function handleClaudeCodeConfigChange(
   context: vscode.ExtensionContext,
 ): void {
   const config = vscode.workspace.getConfiguration('weekendmode');
-  const enabled = config.get<boolean>('claudeCode.enabled', false);
+  const enabled = config.get<boolean>('claudeCode.enabled', true);
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
 
   if (enabled && !claudeWatcher) {
@@ -163,6 +165,7 @@ function handleClaudeCodeConfigChange(
       for (const event of events) {
         heartbeatService!.setActivity(event);
       }
+      presenceTracker!.recordExternalActivity('task_start', false);
       heartbeatService!.flushActivity();
     });
 

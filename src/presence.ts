@@ -11,12 +11,12 @@ const FOCUS_DEBOUNCE_MS = 10_000;
 
 function getActiveThresholdMs(): number {
   const config = vscode.workspace.getConfiguration('weekendmode');
-  return config.get<number>('idleAfterSeconds', 60) * 1000;
+  return config.get<number>('idleAfterSeconds', 300) * 1000;
 }
 
 function getIdleThresholdMs(): number {
   const config = vscode.workspace.getConfiguration('weekendmode');
-  return config.get<number>('awayAfterSeconds', 300) * 1000;
+  return config.get<number>('awayAfterSeconds', 900) * 1000;
 }
 
 export interface PresenceState {
@@ -142,14 +142,9 @@ export class PresenceTracker implements vscode.Disposable {
     const activeThreshold = getActiveThresholdMs();
     const idleThreshold = getIdleThresholdMs();
 
-    // If focus debounce timer is pending, treat window as still focused
-    const effectivelyUnfocused = !this.windowFocused && this.focusDebounceTimer === undefined;
-
     let newStatus: PresenceStatus;
 
-    if (effectivelyUnfocused) {
-      newStatus = 'away';
-    } else if (elapsed <= activeThreshold) {
+    if (elapsed <= activeThreshold) {
       newStatus = 'active';
     } else if (elapsed <= idleThreshold) {
       newStatus = 'idle';
