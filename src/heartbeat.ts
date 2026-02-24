@@ -1,23 +1,32 @@
-import * as https from 'https';
-import * as http from 'http';
 import * as vscode from 'vscode';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName } from './workspace';
+import { ClaudeActivityEvent, ClaudeActivityType } from './claudeWatcher';
 
-const ENDPOINT_URL = 'https://vs-code.free.beeceptor.com/presence';
+const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
 const CLIENT_TYPE = 'vscode';
 const CLIENT_VERSION = '0.1.0';
 
 const BACKOFF_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 function getActiveIntervalMs(): number {
-  const config = vscode.workspace.getConfiguration('vibemap');
+  const config = vscode.workspace.getConfiguration('weekendmode');
   return config.get<number>('heartbeatActiveSeconds', 30) * 1000;
 }
 
 function getIdleIntervalMs(): number {
-  const config = vscode.workspace.getConfiguration('vibemap');
+  const config = vscode.workspace.getConfiguration('weekendmode');
   return config.get<number>('heartbeatIdleSeconds', 120) * 1000;
+}
+
+interface ActivityBlock {
+  seq: number;
+  type: ClaudeActivityType;
+  tool: string | null;
+  filePath: string | null;
+  command: string | null;
+  summary: string;
+  source: string;
 }
 
 interface HeartbeatPayload {
@@ -33,6 +42,7 @@ interface HeartbeatPayload {
     type: string;
     version: string;
   };
+  activity?: ActivityBlock;
 }
 
 export class HeartbeatService {
@@ -47,6 +57,10 @@ export class HeartbeatService {
   private sessionId: string;
   private seq: number = 0;
   private getFocused: () => boolean;
+
+  // Claude activity
+  private pendingActivity: ActivityBlock | null = null;
+  private activitySeq: number = 0;
 
   // Network reliability
   private heartbeatInFlight: boolean = false;
@@ -107,6 +121,25 @@ export class HeartbeatService {
     return this.connected;
   }
 
+  setActivity(event: ClaudeActivityEvent): void {
+    this.activitySeq += 1;
+    this.pendingActivity = {
+      seq: this.activitySeq,
+      type: event.activityType,
+      tool: event.tool,
+      filePath: event.filePath,
+      command: event.command,
+      summary: event.summary,
+      source: 'claude_code',
+    };
+  }
+
+  flushActivity(): void {
+    if (this.pendingActivity) {
+      this.sendHeartbeat();
+    }
+  }
+
   dispose(): void {
     this.stop();
   }
@@ -137,7 +170,7 @@ export class HeartbeatService {
     const workspaceName = getWorkspaceName();
 
     if (!workspaceId || !workspaceName) {
-      console.log('[Vibemap] No workspace open, skipping heartbeat');
+      console.log('[WeekendMode] No workspace open, skipping heartbeat');
       return;
     }
 
@@ -158,36 +191,36 @@ export class HeartbeatService {
       },
     };
 
-    console.log(`[Vibemap] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}`);
+    if (this.pendingActivity) {
+      payload.activity = this.pendingActivity;
+      this.pendingActivity = null;
+    }
+
+    const activityInfo = payload.activity ? ` activity=${payload.activity.type} activitySeq=${payload.activity.seq}` : '';
+    console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
     this.postPayload(payload);
   }
 
-  private postPayload(payload: HeartbeatPayload): void {
+  private async postPayload(payload: HeartbeatPayload): Promise<void> {
     this.heartbeatInFlight = true;
 
-    const data = JSON.stringify(payload);
-    const url = new URL(ENDPOINT_URL);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
 
-    const options: https.RequestOptions = {
-      hostname: url.hostname,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data),
-      },
-      timeout: 5_000,
-    };
+      const res = await fetch(ENDPOINT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
 
-    const transport = url.protocol === 'https:' ? https : http;
+      clearTimeout(timeout);
 
-    const req = transport.request(options, (res) => {
-      res.resume();
+      const success = res.status < 500;
+      console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
+
       this.heartbeatInFlight = false;
-
-      const success = res.statusCode !== undefined && res.statusCode < 500;
-      console.log(`[Vibemap] ${new Date().toLocaleTimeString()} Response: ${res.statusCode}`);
-
       const wasConnected = this.connected;
       this.connected = success;
 
@@ -201,10 +234,9 @@ export class HeartbeatService {
       if (wasConnected !== this.connected && this.onConnectionChangeCallback) {
         this.onConnectionChangeCallback(this.connected);
       }
-    });
-
-    req.on('error', (err) => {
-      console.log(`[Vibemap] ${new Date().toLocaleTimeString()} Request error: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Request error: ${msg}`);
       this.heartbeatInFlight = false;
 
       const wasConnected = this.connected;
@@ -214,14 +246,7 @@ export class HeartbeatService {
       if (wasConnected !== this.connected && this.onConnectionChangeCallback) {
         this.onConnectionChangeCallback(this.connected);
       }
-    });
-
-    req.on('timeout', () => {
-      req.destroy();
-    });
-
-    req.write(data);
-    req.end();
+    }
   }
 
   private scheduleRetry(): void {
@@ -230,7 +255,7 @@ export class HeartbeatService {
     const delayMs = BACKOFF_DELAYS_MS[Math.min(this.currentBackoffIndex, BACKOFF_DELAYS_MS.length - 1)];
     this.currentBackoffIndex += 1;
 
-    console.log(`[Vibemap] Scheduling retry in ${delayMs}ms (attempt ${this.currentBackoffIndex})`);
+    console.log(`[WeekendMode] Scheduling retry in ${delayMs}ms (attempt ${this.currentBackoffIndex})`);
 
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;

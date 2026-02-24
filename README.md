@@ -1,8 +1,9 @@
-# Vibemap
+# WeekendMode
 
 Presence detection for VS Code. Tracks developer activity and reports status (`active`, `idle`, `away`) to a configurable endpoint.
 
 ## Features
+
 
 - **Activity detection** — monitors edits, saves, editor switches, window focus, debug sessions, and build tasks
 - **Presence state machine** — automatically transitions between `active`, `idle`, and `away` based on activity
@@ -16,25 +17,25 @@ Presence detection for VS Code. Tracks developer activity and reports status (`a
 
 | State | Display |
 |-------|---------|
-| Active | `Vibemap: Active` |
-| Idle | `Vibemap: Idle` |
-| Away | `Vibemap: Away` |
-| Paused | `Vibemap: Paused` |
-| Disconnected | `Vibemap: Not Connected` |
+| Active | `WeekendMode: Active` |
+| Idle | `WeekendMode: Idle` |
+| Away | `WeekendMode: Away` |
+| Paused | `WeekendMode: Paused` |
+| Disconnected | `WeekendMode: Not Connected` |
 
 ## Commands
 
-- **Vibemap: Pause Presence Tracking** — stop sending heartbeats
-- **Vibemap: Resume Presence Tracking** — resume sending heartbeats
+- **WeekendMode: Pause Presence Tracking** — stop sending heartbeats
+- **WeekendMode: Resume Presence Tracking** — resume sending heartbeats
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `vibemap.idleAfterSeconds` | `60` | Seconds of inactivity before status becomes idle |
-| `vibemap.awayAfterSeconds` | `300` | Seconds of inactivity before status becomes away |
-| `vibemap.heartbeatActiveSeconds` | `30` | Heartbeat interval while active |
-| `vibemap.heartbeatIdleSeconds` | `120` | Heartbeat interval while idle |
+| `weekendmode.idleAfterSeconds` | `60` | Seconds of inactivity before status becomes idle |
+| `weekendmode.awayAfterSeconds` | `300` | Seconds of inactivity before status becomes away |
+| `weekendmode.heartbeatActiveSeconds` | `30` | Heartbeat interval while active |
+| `weekendmode.heartbeatIdleSeconds` | `120` | Heartbeat interval while idle |
 
 ## Privacy
 

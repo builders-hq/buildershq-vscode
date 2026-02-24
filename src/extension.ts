@@ -3,12 +3,14 @@ import { randomUUID } from 'crypto';
 import { PresenceTracker, PresenceStatus, ActivityReason } from './presence';
 import { HeartbeatService } from './heartbeat';
 import { StatusBarManager } from './statusBar';
+import { ClaudeCodeWatcher } from './claudeWatcher';
 
-const PAUSE_STATE_KEY = 'vibemap.paused';
+const PAUSE_STATE_KEY = 'weekendmode.paused';
 
 let presenceTracker: PresenceTracker | undefined;
 let heartbeatService: HeartbeatService | undefined;
 let statusBarManager: StatusBarManager | undefined;
+let claudeWatcher: ClaudeCodeWatcher | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const sessionId = randomUUID();
@@ -42,16 +44,20 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Pause / Resume commands
-  const pauseCmd = vscode.commands.registerCommand('vibemap.pause', async () => {
+  const pauseCmd = vscode.commands.registerCommand('weekendmode.pause', async () => {
     await context.globalState.update(PAUSE_STATE_KEY, true);
     heartbeatService!.stop();
+    claudeWatcher?.stop();
     updateStatusBar(context);
   });
 
-  const resumeCmd = vscode.commands.registerCommand('vibemap.resume', async () => {
+  const resumeCmd = vscode.commands.registerCommand('weekendmode.resume', async () => {
     await context.globalState.update(PAUSE_STATE_KEY, false);
     const state = presenceTracker!.getState();
     heartbeatService!.start(state.status, state.reason);
+    if (claudeWatcher) {
+      claudeWatcher.start();
+    }
     updateStatusBar(context);
   });
 
@@ -75,10 +81,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Restart heartbeat timer when configuration changes
   const configChangeSub = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration('vibemap')) {
+    if (e.affectsConfiguration('weekendmode')) {
+      // Existing heartbeat reconfiguration
       if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
         const state = presenceTracker!.getState();
         heartbeatService!.onPresenceStateChange(state.status, state.status, state.reason);
+      }
+
+      // Handle Claude Code enabled/disabled toggle
+      if (e.affectsConfiguration('weekendmode.claudeCode')) {
+        handleClaudeCodeConfigChange(context);
       }
     }
   });
@@ -89,6 +101,9 @@ export function activate(context: vscode.ExtensionContext): void {
   if (!isPaused) {
     heartbeatService.start('active', 'activate');
   }
+
+  // Claude Code activity tracking (opt-in)
+  initClaudeCodeTracking(context, isPaused);
 
   updateStatusBar(context);
 
@@ -106,6 +121,71 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
+function initClaudeCodeTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  if (!config.get<boolean>('claudeCode.enabled', false)) {
+    return;
+  }
+
+  claudeWatcher = new ClaudeCodeWatcher();
+
+  claudeWatcher.onActivityBatch((events) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    for (const event of events) {
+      heartbeatService!.setActivity(event);
+    }
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    claudeWatcher.start();
+  }
+
+  context.subscriptions.push(claudeWatcher);
+}
+
+function handleClaudeCodeConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  const enabled = config.get<boolean>('claudeCode.enabled', false);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !claudeWatcher) {
+    // Turning on
+    claudeWatcher = new ClaudeCodeWatcher();
+
+    claudeWatcher.onActivityBatch((events) => {
+      if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+      for (const event of events) {
+        heartbeatService!.setActivity(event);
+      }
+      heartbeatService!.flushActivity();
+    });
+
+    if (!isPaused) {
+      claudeWatcher.start();
+    }
+
+    context.subscriptions.push(claudeWatcher);
+  } else if (!enabled && claudeWatcher) {
+    // Turning off
+    claudeWatcher.dispose();
+    claudeWatcher = undefined;
+  } else if (enabled && claudeWatcher) {
+    // Config changed (e.g. transcriptPath) — restart watcher
+    claudeWatcher.stop();
+    if (!isPaused) {
+      claudeWatcher.start();
+    }
+  }
+
+  updateStatusBar(context);
+}
+
 function updateStatusBar(context: vscode.ExtensionContext): void {
   if (!presenceTracker || !heartbeatService || !statusBarManager) {
     return;
@@ -113,12 +193,15 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   const paused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
   const status = presenceTracker.getStatus();
   const connected = heartbeatService.isConnected();
-  statusBarManager.update(status, paused, connected);
+  const claudeActive = claudeWatcher?.isWatching() ?? false;
+  statusBarManager.update(status, paused, connected, claudeActive);
 }
 
 export function deactivate(): void {
   heartbeatService?.dispose();
+  claudeWatcher?.dispose();
   presenceTracker = undefined;
   heartbeatService = undefined;
   statusBarManager = undefined;
+  claudeWatcher = undefined;
 }
