@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName } from './workspace';
 import { ClaudeActivityEvent, ClaudeActivityType } from './claudeWatcher';
 
 const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
 const CLIENT_TYPE = 'vscode';
-const CLIENT_VERSION = '0.1.0';
+const CLIENT_VERSION = '0.2.0';
 
 const BACKOFF_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
@@ -20,6 +21,7 @@ function getIdleIntervalMs(): number {
 }
 
 interface ActivityBlock {
+  claudeSessionId: string;
   seq: number;
   type: ClaudeActivityType;
   tool: string | null;
@@ -35,6 +37,7 @@ interface HeartbeatPayload {
   reason: ActivityReason;
   workspaceId: string;
   workspaceName: string;
+  computerName: string;
   sessionId: string;
   seq: number;
   focused: boolean;
@@ -42,7 +45,7 @@ interface HeartbeatPayload {
     type: string;
     version: string;
   };
-  activity?: ActivityBlock;
+  activities?: ActivityBlock[];
 }
 
 export class HeartbeatService {
@@ -59,8 +62,12 @@ export class HeartbeatService {
   private getFocused: () => boolean;
 
   // Claude activity
-  private pendingActivity: ActivityBlock | null = null;
+  private pendingActivities: Map<string, ActivityBlock> = new Map();
+  private lastSentActivities: ActivityBlock[] = [];
+  private lastActivityAt: number = 0;
   private activitySeq: number = 0;
+
+  private static readonly ACTIVITY_TTL_MS = 600_000; // 10 minutes
 
   // Network reliability
   private heartbeatInFlight: boolean = false;
@@ -123,7 +130,9 @@ export class HeartbeatService {
 
   setActivity(event: ClaudeActivityEvent): void {
     this.activitySeq += 1;
-    this.pendingActivity = {
+    this.lastActivityAt = Date.now();
+    this.pendingActivities.set(event.claudeSessionId, {
+      claudeSessionId: event.claudeSessionId,
       seq: this.activitySeq,
       type: event.activityType,
       tool: event.tool,
@@ -131,11 +140,11 @@ export class HeartbeatService {
       command: event.command,
       summary: event.summary,
       source: 'claude_code',
-    };
+    });
   }
 
   flushActivity(): void {
-    if (this.pendingActivity) {
+    if (this.pendingActivities.size > 0) {
       this.sendHeartbeat();
     }
   }
@@ -182,6 +191,7 @@ export class HeartbeatService {
       reason: this.currentReason,
       workspaceId,
       workspaceName,
+      computerName: os.hostname(),
       sessionId: this.sessionId,
       seq: this.seq,
       focused: this.getFocused(),
@@ -191,12 +201,24 @@ export class HeartbeatService {
       },
     };
 
-    if (this.pendingActivity) {
-      payload.activity = this.pendingActivity;
-      this.pendingActivity = null;
+    if (this.pendingActivities.size > 0) {
+      // New activity arrived — send it and remember for re-sending
+      this.lastSentActivities = Array.from(this.pendingActivities.values());
+      this.lastActivityAt = Date.now();
+      this.pendingActivities.clear();
+      payload.activities = this.lastSentActivities;
+    } else if (
+      this.lastSentActivities.length > 0 &&
+      Date.now() - this.lastActivityAt < HeartbeatService.ACTIVITY_TTL_MS
+    ) {
+      // No new activity but last known is still fresh — re-send
+      payload.activities = this.lastSentActivities;
+    } else if (this.lastSentActivities.length > 0) {
+      // Expired — clear
+      this.lastSentActivities = [];
     }
 
-    const activityInfo = payload.activity ? ` activity=${payload.activity.type} activitySeq=${payload.activity.seq}` : '';
+    const activityInfo = payload.activities ? ` activities=${payload.activities.length}` : '';
     console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
     this.postPayload(payload);
   }

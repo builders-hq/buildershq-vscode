@@ -23,6 +23,15 @@ export interface ClaudeActivityEvent {
 
 export type ActivityBatchCallback = (events: ClaudeActivityEvent[]) => void;
 
+interface TrackedFile {
+  filePath: string;
+  byteOffset: number;
+  partialLine: string;
+  fsWatcher: fs.FSWatcher | null;
+  pollingTimer: ReturnType<typeof setInterval> | undefined;
+  debounceTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
 function truncate(value: string | undefined | null, maxLen: number): string | null {
   if (!value) { return null; }
   return value.length > maxLen ? value.slice(0, maxLen) : value;
@@ -98,17 +107,10 @@ function workspacePathToSlug(workspacePath: string): string {
 
 export class ClaudeCodeWatcher implements vscode.Disposable {
   private onActivityBatchCallback: ActivityBatchCallback | undefined;
-  private currentFilePath: string | null = null;
-  private byteOffset: number = 0;
-  private partialLine: string = '';
-  private fsWatcher: fs.FSWatcher | null = null;
+  private trackedFiles: Map<string, TrackedFile> = new Map();
   private redetectionTimer: ReturnType<typeof setInterval> | undefined;
-  private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private batchTimer: ReturnType<typeof setTimeout> | undefined;
-  private pollingTimer: ReturnType<typeof setInterval> | undefined;
-  private lastWatchEventAt: number = 0;
   private pendingEvents: ClaudeActivityEvent[] = [];
-  private watching: boolean = false;
   private started: boolean = false;
 
   private static readonly BATCH_MAX_EVENTS = 10;
@@ -116,8 +118,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
   private static readonly REDETECTION_INTERVAL_MS = 30_000;
   private static readonly DEBOUNCE_MS = 100;
   private static readonly POLLING_INTERVAL_MS = 2_000;
-  private static readonly POLLING_WATCHDOG_MS = 10_000;
-  private static readonly RECENT_FILE_WINDOW_MS = 60_000;
+  private static readonly ACTIVE_FILE_THRESHOLD_MS = 600_000;
   private static readonly RECENT_FILE_READ_BYTES = 8192;
 
   onActivityBatch(callback: ActivityBatchCallback): void {
@@ -127,31 +128,23 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
   start(): void {
     if (this.started) { return; }
     this.started = true;
-    this.findAndWatch();
-    this.redetectionTimer = setInterval(() => this.checkForNewerFile(), ClaudeCodeWatcher.REDETECTION_INTERVAL_MS);
+    this.findAndWatchAll();
+    this.redetectionTimer = setInterval(() => this.reconcileActiveFiles(), ClaudeCodeWatcher.REDETECTION_INTERVAL_MS);
   }
 
   stop(): void {
     if (!this.started) { return; }
     this.started = false;
     this.flushBatch();
-    this.closeWatcher();
+    this.closeAllWatchers();
     if (this.redetectionTimer !== undefined) {
       clearInterval(this.redetectionTimer);
       this.redetectionTimer = undefined;
     }
-    if (this.debounceTimer !== undefined) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = undefined;
-    }
-    if (this.pollingTimer !== undefined) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = undefined;
-    }
   }
 
   isWatching(): boolean {
-    return this.watching;
+    return this.trackedFiles.size > 0;
   }
 
   dispose(): void {
@@ -177,13 +170,14 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     return path.join(os.homedir(), '.claude', 'projects', slug);
   }
 
-  private async findMostRecentJsonl(dir: string): Promise<string | null> {
+  private async findActiveJsonlFiles(dir: string): Promise<string[]> {
     try {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true });
       const jsonlFiles = entries.filter(e => e.isFile() && e.name.endsWith('.jsonl'));
 
-      if (jsonlFiles.length === 0) { return null; }
+      if (jsonlFiles.length === 0) { return []; }
 
+      const now = Date.now();
       const stats = await Promise.all(
         jsonlFiles.map(async (e) => {
           const filePath = path.join(dir, e.name);
@@ -192,173 +186,196 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
         })
       );
 
-      stats.sort((a, b) => b.mtimeMs - a.mtimeMs);
-      return stats[0].path;
+      return stats
+        .filter(s => now - s.mtimeMs < ClaudeCodeWatcher.ACTIVE_FILE_THRESHOLD_MS)
+        .map(s => s.path);
     } catch {
-      return null;
+      return [];
     }
   }
 
-  private async findAndWatch(): Promise<void> {
+  private async findAndWatchAll(): Promise<void> {
     const dir = this.resolveTranscriptDir();
     if (!dir) {
       console.log('[WeekendMode:Claude] No workspace open, cannot detect transcript directory');
-      this.watching = false;
       return;
     }
 
-    const filePath = await this.findMostRecentJsonl(dir);
-    if (!filePath) {
-      console.log(`[WeekendMode:Claude] No JSONL files found in ${dir}, will retry in 30s`);
-      this.watching = false;
+    const activeFiles = await this.findActiveJsonlFiles(dir);
+    if (activeFiles.length === 0) {
+      console.log(`[WeekendMode:Claude] No active JSONL files found in ${dir}, will retry in 30s`);
       return;
     }
 
-    await this.attachToFile(filePath);
+    for (const filePath of activeFiles) {
+      if (!this.trackedFiles.has(filePath)) {
+        await this.attachToFile(filePath);
+      }
+    }
   }
 
-  private async checkForNewerFile(): Promise<void> {
+  private async reconcileActiveFiles(): Promise<void> {
     if (!this.started) { return; }
 
     const dir = this.resolveTranscriptDir();
     if (!dir) { return; }
 
-    const newest = await this.findMostRecentJsonl(dir);
-    if (!newest) { return; }
+    const activeFiles = await this.findActiveJsonlFiles(dir);
+    const activeSet = new Set(activeFiles);
 
-    if (newest !== this.currentFilePath) {
-      console.log(`[WeekendMode:Claude] Switching to newer transcript: ${path.basename(newest)}`);
-      this.closeWatcher();
-      await this.attachToFile(newest);
+    // Detach stale files
+    for (const filePath of this.trackedFiles.keys()) {
+      if (!activeSet.has(filePath)) {
+        console.log(`[WeekendMode:Claude] Detaching stale transcript: ${path.basename(filePath)}`);
+        this.detachFile(filePath);
+      }
+    }
+
+    // Attach new files
+    for (const filePath of activeFiles) {
+      if (!this.trackedFiles.has(filePath)) {
+        console.log(`[WeekendMode:Claude] Attaching new transcript: ${path.basename(filePath)}`);
+        await this.attachToFile(filePath);
+      }
     }
   }
 
   private async attachToFile(filePath: string): Promise<void> {
-    this.currentFilePath = filePath;
-    this.partialLine = '';
+    const tracked: TrackedFile = {
+      filePath,
+      byteOffset: 0,
+      partialLine: '',
+      fsWatcher: null,
+      pollingTimer: undefined,
+      debounceTimer: undefined,
+    };
+
+    this.trackedFiles.set(filePath, tracked);
 
     try {
       const stat = await fs.promises.stat(filePath);
       const now = Date.now();
 
       // If file was recently modified, read last 8KB to catch in-progress activity
-      if (now - stat.mtimeMs < ClaudeCodeWatcher.RECENT_FILE_WINDOW_MS && stat.size > 0) {
+      if (now - stat.mtimeMs < ClaudeCodeWatcher.ACTIVE_FILE_THRESHOLD_MS && stat.size > 0) {
         const readStart = Math.max(0, stat.size - ClaudeCodeWatcher.RECENT_FILE_READ_BYTES);
-        this.byteOffset = readStart;
-        await this.readNewBytes();
+        tracked.byteOffset = readStart;
+        await this.readNewBytes(tracked);
       } else {
-        this.byteOffset = stat.size;
+        tracked.byteOffset = stat.size;
       }
 
-      this.setupWatcher(filePath);
-      this.watching = true;
+      this.setupWatcher(tracked);
       console.log(`[WeekendMode:Claude] Watching: ${filePath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`[WeekendMode:Claude] Failed to attach to file: ${msg}`);
-      this.watching = false;
+      this.trackedFiles.delete(filePath);
     }
+  }
+
+  private detachFile(filePath: string): void {
+    const tracked = this.trackedFiles.get(filePath);
+    if (!tracked) { return; }
+
+    if (tracked.fsWatcher) {
+      tracked.fsWatcher.close();
+    }
+    if (tracked.pollingTimer !== undefined) {
+      clearInterval(tracked.pollingTimer);
+    }
+    if (tracked.debounceTimer !== undefined) {
+      clearTimeout(tracked.debounceTimer);
+    }
+    this.trackedFiles.delete(filePath);
   }
 
   // --- Private: file watching ---
 
-  private setupWatcher(filePath: string): void {
+  private setupWatcher(tracked: TrackedFile): void {
     try {
-      this.fsWatcher = fs.watch(filePath, { persistent: false }, (eventType) => {
-        this.lastWatchEventAt = Date.now();
-
+      tracked.fsWatcher = fs.watch(tracked.filePath, { persistent: false }, (eventType) => {
         if (eventType === 'change') {
-          this.debouncedRead();
+          this.debouncedRead(tracked);
         } else if (eventType === 'rename') {
-          console.log('[WeekendMode:Claude] Transcript file renamed/deleted, will re-detect');
-          this.closeWatcher();
-          this.watching = false;
-          // Re-detection will happen on next interval
+          console.log(`[WeekendMode:Claude] Transcript file renamed/deleted: ${path.basename(tracked.filePath)}`);
+          this.detachFile(tracked.filePath);
         }
       });
 
-      this.fsWatcher.on('error', (err) => {
-        console.log(`[WeekendMode:Claude] fs.watch error: ${err.message}, falling back to polling`);
-        this.closeWatcher();
-        this.startPolling();
+      tracked.fsWatcher.on('error', (err) => {
+        console.log(`[WeekendMode:Claude] fs.watch error on ${path.basename(tracked.filePath)}: ${err.message}, falling back to polling`);
+        if (tracked.fsWatcher) {
+          tracked.fsWatcher.close();
+          tracked.fsWatcher = null;
+        }
+        this.startPolling(tracked);
       });
     } catch {
-      console.log('[WeekendMode:Claude] fs.watch failed, falling back to polling');
-      this.startPolling();
+      console.log(`[WeekendMode:Claude] fs.watch failed for ${path.basename(tracked.filePath)}, falling back to polling`);
+      this.startPolling(tracked);
     }
   }
 
-  private startPolling(): void {
-    if (this.pollingTimer !== undefined) { return; }
-    this.pollingTimer = setInterval(() => this.pollFileChange(), ClaudeCodeWatcher.POLLING_INTERVAL_MS);
-    this.watching = true;
+  private startPolling(tracked: TrackedFile): void {
+    if (tracked.pollingTimer !== undefined) { return; }
+    tracked.pollingTimer = setInterval(() => this.pollFileChange(tracked), ClaudeCodeWatcher.POLLING_INTERVAL_MS);
   }
 
-  private async pollFileChange(): Promise<void> {
-    if (!this.currentFilePath) { return; }
+  private async pollFileChange(tracked: TrackedFile): Promise<void> {
     try {
-      const stat = await fs.promises.stat(this.currentFilePath);
-      if (stat.size !== this.byteOffset) {
-        await this.readNewBytes();
+      const stat = await fs.promises.stat(tracked.filePath);
+      if (stat.size !== tracked.byteOffset) {
+        await this.readNewBytes(tracked);
       }
     } catch {
       // File may have been deleted
-      this.closeWatcher();
-      this.watching = false;
+      this.detachFile(tracked.filePath);
     }
   }
 
-  private closeWatcher(): void {
-    if (this.fsWatcher) {
-      this.fsWatcher.close();
-      this.fsWatcher = null;
+  private closeAllWatchers(): void {
+    for (const filePath of [...this.trackedFiles.keys()]) {
+      this.detachFile(filePath);
     }
-    if (this.pollingTimer !== undefined) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = undefined;
-    }
-    this.currentFilePath = null;
-    this.watching = false;
   }
 
-  private debouncedRead(): void {
-    if (this.debounceTimer !== undefined) {
-      clearTimeout(this.debounceTimer);
+  private debouncedRead(tracked: TrackedFile): void {
+    if (tracked.debounceTimer !== undefined) {
+      clearTimeout(tracked.debounceTimer);
     }
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = undefined;
-      this.readNewBytes();
+    tracked.debounceTimer = setTimeout(() => {
+      tracked.debounceTimer = undefined;
+      this.readNewBytes(tracked);
     }, ClaudeCodeWatcher.DEBOUNCE_MS);
   }
 
   // --- Private: reading & parsing ---
 
-  private async readNewBytes(): Promise<void> {
-    if (!this.currentFilePath) { return; }
-
+  private async readNewBytes(tracked: TrackedFile): Promise<void> {
     let fd: fs.promises.FileHandle | undefined;
     try {
-      const stat = await fs.promises.stat(this.currentFilePath);
+      const stat = await fs.promises.stat(tracked.filePath);
 
       // File was truncated or replaced
-      if (stat.size < this.byteOffset) {
-        this.byteOffset = 0;
-        this.partialLine = '';
+      if (stat.size < tracked.byteOffset) {
+        tracked.byteOffset = 0;
+        tracked.partialLine = '';
       }
 
-      if (stat.size === this.byteOffset) { return; }
+      if (stat.size === tracked.byteOffset) { return; }
 
-      const readLength = stat.size - this.byteOffset;
-      fd = await fs.promises.open(this.currentFilePath, 'r');
+      const readLength = stat.size - tracked.byteOffset;
+      fd = await fs.promises.open(tracked.filePath, 'r');
       const buffer = Buffer.alloc(readLength);
-      await fd.read(buffer, 0, readLength, this.byteOffset);
-      this.byteOffset = stat.size;
+      await fd.read(buffer, 0, readLength, tracked.byteOffset);
+      tracked.byteOffset = stat.size;
 
-      const text = this.partialLine + buffer.toString('utf-8');
+      const text = tracked.partialLine + buffer.toString('utf-8');
       const lines = text.split('\n');
 
       // Last element is either '' (if text ended with \n) or a partial line
-      this.partialLine = lines.pop() || '';
+      tracked.partialLine = lines.pop() || '';
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -367,7 +384,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode:Claude] Read error: ${msg}`);
+      console.log(`[WeekendMode:Claude] Read error on ${path.basename(tracked.filePath)}: ${msg}`);
     } finally {
       if (fd) {
         await fd.close().catch(() => {});

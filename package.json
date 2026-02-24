@@ -2,7 +2,7 @@
   "name": "weekendmode",
   "displayName": "WeekendMode",
   "description": "Presence detection extension that reports developer activity status",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "appmakers",
   "license": "MIT",
   "engines": {
@@ -55,7 +55,7 @@
         },
         "weekendmode.claudeCode.enabled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Enable Claude Code activity tracking (watches JSONL transcript files)."
         },
         "weekendmode.claudeCode.transcriptPath": {
