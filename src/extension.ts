@@ -17,6 +17,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   presenceTracker = new PresenceTracker();
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused());
+  heartbeatService.resolveRepoInfo().catch(() => { /* repoUrl stays null */ });
   statusBarManager = new StatusBarManager();
 
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);

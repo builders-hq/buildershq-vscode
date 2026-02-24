@@ -2,7 +2,7 @@
   "name": "weekendmode",
   "displayName": "WeekendMode",
   "description": "Presence detection extension that reports developer activity status",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "appmakers",
   "license": "MIT",
   "engines": {

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import { PresenceStatus, ActivityReason } from './presence';
-import { getWorkspaceId, getWorkspaceName } from './workspace';
+import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
 import { ClaudeActivityEvent, ClaudeActivityType } from './claudeWatcher';
 
 const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
@@ -37,6 +37,8 @@ interface HeartbeatPayload {
   reason: ActivityReason;
   workspaceId: string;
   workspaceName: string;
+  repoUrl?: string;
+  repoName?: string;
   computerName: string;
   sessionId: string;
   seq: number;
@@ -61,6 +63,10 @@ export class HeartbeatService {
   private seq: number = 0;
   private getFocused: () => boolean;
 
+  // Repo identity
+  private repoUrl: string | null = null;
+  private repoName: string | null = null;
+
   // Claude activity
   private pendingActivities: Map<string, ActivityBlock> = new Map();
   private lastSentActivities: ActivityBlock[] = [];
@@ -77,6 +83,11 @@ export class HeartbeatService {
   constructor(sessionId: string, getFocused: () => boolean) {
     this.sessionId = sessionId;
     this.getFocused = getFocused;
+  }
+
+  async resolveRepoInfo(): Promise<void> {
+    this.repoUrl = await getRepoUrl();
+    this.repoName = getRepoName();
   }
 
   onConnectionChange(callback: (connected: boolean) => void): void {
@@ -181,6 +192,8 @@ export class HeartbeatService {
       reason: this.currentReason,
       workspaceId,
       workspaceName,
+      ...(this.repoUrl && { repoUrl: this.repoUrl }),
+      ...(this.repoName && { repoName: this.repoName }),
       computerName: os.hostname(),
       sessionId: this.sessionId,
       seq: this.seq,
