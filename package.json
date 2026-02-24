@@ -31,13 +31,13 @@
       "properties": {
         "weekendmode.idleAfterSeconds": {
           "type": "number",
-          "default": 60,
+          "default": 300,
           "minimum": 10,
           "description": "Seconds of inactivity before status becomes idle."
         },
         "weekendmode.awayAfterSeconds": {
           "type": "number",
-          "default": 300,
+          "default": 900,
           "minimum": 30,
           "description": "Seconds of inactivity before status becomes away."
         },
@@ -49,7 +49,7 @@
         },
         "weekendmode.heartbeatIdleSeconds": {
           "type": "number",
-          "default": 120,
+          "default": 60,
           "minimum": 30,
           "description": "How often (in seconds) to send heartbeats while idle."
         },

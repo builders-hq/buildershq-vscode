@@ -17,7 +17,7 @@ function getActiveIntervalMs(): number {
 
 function getIdleIntervalMs(): number {
   const config = vscode.workspace.getConfiguration('weekendmode');
-  return config.get<number>('heartbeatIdleSeconds', 120) * 1000;
+  return config.get<number>('heartbeatIdleSeconds', 60) * 1000;
 }
 
 interface ActivityBlock {
@@ -91,17 +91,9 @@ export class HeartbeatService {
     this.currentStatus = newStatus;
     this.currentReason = reason;
 
-    if (newStatus === 'away') {
-      if (!this.awaySent) {
-        this.sendHeartbeat();
-        this.awaySent = true;
-      }
-      this.stopPeriodicTimer();
-    } else {
-      this.awaySent = false;
-      this.sendHeartbeat();
-      this.startPeriodicTimer();
-    }
+    this.awaySent = false;
+    this.sendHeartbeat();
+    this.startPeriodicTimer();
   }
 
   forceHeartbeat(reason: ActivityReason): void {
@@ -114,9 +106,7 @@ export class HeartbeatService {
     this.currentReason = reason;
     this.awaySent = false;
     this.sendHeartbeat();
-    if (status !== 'away') {
-      this.startPeriodicTimer();
-    }
+    this.startPeriodicTimer();
   }
 
   stop(): void {
