@@ -53,6 +53,11 @@
           "minimum": 30,
           "description": "How often (in seconds) to send heartbeats while idle."
         },
+        "weekendmode.gitCommits.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track git commits as developer activity."
+        },
         "weekendmode.claudeCode.enabled": {
           "type": "boolean",
           "default": true,

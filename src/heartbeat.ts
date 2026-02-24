@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
-import { ClaudeActivityEvent, ClaudeActivityType } from './claudeWatcher';
+import { ClaudeActivityEvent } from './claudeWatcher';
 
 const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
 const CLIENT_TYPE = 'vscode';
@@ -23,7 +23,7 @@ function getIdleIntervalMs(): number {
 interface ActivityBlock {
   claudeSessionId: string;
   seq: number;
-  type: ClaudeActivityType;
+  type: string;
   tool: string | null;
   filePath: string | null;
   command: string | null;
@@ -129,7 +129,7 @@ export class HeartbeatService {
     return this.connected;
   }
 
-  setActivity(event: ClaudeActivityEvent): void {
+  setActivity(event: ClaudeActivityEvent, source: string = 'claude_code'): void {
     this.activitySeq += 1;
     this.lastActivityAt = Date.now();
     this.pendingActivities.set(event.claudeSessionId, {
@@ -140,13 +140,50 @@ export class HeartbeatService {
       filePath: event.filePath,
       command: event.command,
       summary: event.summary,
-      source: 'claude_code',
+      source,
     });
   }
 
   flushActivity(): void {
     if (this.pendingActivities.size > 0) {
       this.sendHeartbeat();
+    }
+  }
+
+  async sendDeactivate(): Promise<void> {
+    const workspaceId = getWorkspaceId();
+    const workspaceName = getWorkspaceName();
+    if (!workspaceId || !workspaceName) return;
+
+    const payload: HeartbeatPayload = {
+      timestamp: Math.floor(Date.now() / 1000),
+      status: 'offline' as PresenceStatus,
+      reason: 'none',
+      workspaceId,
+      workspaceName,
+      ...(this.repoUrl && { repoUrl: this.repoUrl }),
+      ...(this.repoName && { repoName: this.repoName }),
+      computerName: os.hostname(),
+      sessionId: this.sessionId,
+      seq: Number.MAX_SAFE_INTEGER,
+      focused: false,
+      client: { type: CLIENT_TYPE, version: CLIENT_VERSION },
+    };
+
+    console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Sending deactivation event`);
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2_000);
+      await fetch(ENDPOINT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+    } catch {
+      // Best effort — don't block VS Code shutdown
     }
   }
 

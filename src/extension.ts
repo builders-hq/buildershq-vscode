@@ -4,6 +4,7 @@ import { PresenceTracker, PresenceStatus, ActivityReason } from './presence';
 import { HeartbeatService } from './heartbeat';
 import { StatusBarManager } from './statusBar';
 import { ClaudeCodeWatcher } from './claudeWatcher';
+import { GitCommitWatcher } from './gitWatcher';
 
 const PAUSE_STATE_KEY = 'weekendmode.paused';
 
@@ -11,6 +12,7 @@ let presenceTracker: PresenceTracker | undefined;
 let heartbeatService: HeartbeatService | undefined;
 let statusBarManager: StatusBarManager | undefined;
 let claudeWatcher: ClaudeCodeWatcher | undefined;
+let gitWatcher: GitCommitWatcher | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const sessionId = randomUUID();
@@ -49,6 +51,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await context.globalState.update(PAUSE_STATE_KEY, true);
     heartbeatService!.stop();
     claudeWatcher?.stop();
+    gitWatcher?.stop();
     updateStatusBar(context);
   });
 
@@ -58,6 +61,9 @@ export function activate(context: vscode.ExtensionContext): void {
     heartbeatService!.start(state.status, state.reason);
     if (claudeWatcher) {
       claudeWatcher.start();
+    }
+    if (gitWatcher) {
+      gitWatcher.start();
     }
     updateStatusBar(context);
   });
@@ -93,6 +99,11 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration('weekendmode.claudeCode')) {
         handleClaudeCodeConfigChange(context);
       }
+
+      // Handle git commits enabled/disabled toggle
+      if (e.affectsConfiguration('weekendmode.gitCommits')) {
+        handleGitCommitsConfigChange(context);
+      }
     }
   });
 
@@ -105,6 +116,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Claude Code activity tracking (opt-in)
   initClaudeCodeTracking(context, isPaused);
+
+  // Git commit activity tracking
+  initGitCommitTracking(context, isPaused);
 
   updateStatusBar(context);
 
@@ -190,6 +204,54 @@ function handleClaudeCodeConfigChange(
   updateStatusBar(context);
 }
 
+function initGitCommitTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  if (!config.get<boolean>('gitCommits.enabled', true)) {
+    return;
+  }
+
+  gitWatcher = new GitCommitWatcher();
+
+  gitWatcher.onCommit((event) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    heartbeatService!.setActivity({
+      timestamp: event.timestamp,
+      claudeSessionId: 'git',
+      activityType: 'git_commit' as 'editing',
+      tool: null,
+      filePath: event.branch,
+      command: null,
+      summary: `Committed: ${event.subject}`,
+    }, 'git');
+    presenceTracker!.recordExternalActivity('save', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    gitWatcher.start();
+  }
+
+  context.subscriptions.push(gitWatcher);
+}
+
+function handleGitCommitsConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  const enabled = config.get<boolean>('gitCommits.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !gitWatcher) {
+    initGitCommitTracking(context, isPaused);
+  } else if (!enabled && gitWatcher) {
+    gitWatcher.dispose();
+    gitWatcher = undefined;
+  }
+}
+
 function updateStatusBar(context: vscode.ExtensionContext): void {
   if (!presenceTracker || !heartbeatService || !statusBarManager) {
     return;
@@ -201,11 +263,16 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   statusBarManager.update(status, paused, connected, claudeActive);
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
+  if (heartbeatService) {
+    await heartbeatService.sendDeactivate();
+  }
   heartbeatService?.dispose();
   claudeWatcher?.dispose();
+  gitWatcher?.dispose();
   presenceTracker = undefined;
   heartbeatService = undefined;
   statusBarManager = undefined;
   claudeWatcher = undefined;
+  gitWatcher = undefined;
 }
