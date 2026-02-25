@@ -32,7 +32,13 @@ export class StatusBarManager implements vscode.Disposable {
     this.statusBarItem.show();
   }
 
-  update(status: PresenceStatus, paused: boolean, connected: boolean, claudeActive?: boolean): void {
+  update(
+    status: PresenceStatus,
+    paused: boolean,
+    connected: boolean,
+    claudeActive?: boolean,
+    codexActive?: boolean,
+  ): void {
     let displayKey: DisplayKey;
 
     if (paused) {
@@ -49,9 +55,16 @@ export class StatusBarManager implements vscode.Disposable {
     this.statusBarItem.text = STATUS_LABELS[displayKey];
     this.statusBarItem.tooltip = STATUS_TOOLTIPS[displayKey];
 
-    if (claudeActive && !paused) {
+    if (!paused && (claudeActive || codexActive)) {
       this.statusBarItem.text += ' $(sparkle)';
-      this.statusBarItem.tooltip += ' | Claude Code active';
+      const activeLabels: string[] = [];
+      if (claudeActive) {
+        activeLabels.push('Claude Code active');
+      }
+      if (codexActive) {
+        activeLabels.push('OpenAI Codex active');
+      }
+      this.statusBarItem.tooltip += ` | ${activeLabels.join(' + ')}`;
     }
   }
 

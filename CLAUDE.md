@@ -2,59 +2,73 @@
 
 ## What is this?
 
-A VS Code extension that tracks developer presence and sends heartbeats to the WeekendMode web app (`c:\appmakers\weekendmode`). Shows up as a desk in the virtual office.
+A VS Code extension that tracks developer presence and sends heartbeats to the WeekendMode web app (`c:\appmakers\weekendmode`).
 
 ## Key Concepts
 
 ### Identity
-- **sessionId**: Random UUID generated per extension activation. Changes on restart.
-- **workspaceId**: SHA-256 hash of the first workspace folder path. Stable per project.
-- **computerName**: `os.hostname()`. Stable per machine. **This is the aggregation key** — the web app groups all sessions with the same `computerName` into one person/desk.
-- **presenceKey**: `{sessionId}:{workspaceId}` — server-side composite key. One Elasticsearch document per presenceKey.
+
+- `sessionId`: random UUID generated per extension activation.
+- `workspaceId`: SHA-256 hash of the first workspace folder path.
+- `computerName`: `os.hostname()`. This is the aggregation key for "same desk" grouping.
+- `presenceKey`: `{sessionId}:{workspaceId}` (server-side composite key).
 
 ### Heartbeat
-- Sends to `http://127.0.0.1:3000/api/presence` (localhost only)
-- Active: every 30s. Idle (5min inactive): every 60s. Away (15min inactive): every 60s.
-- Payload: status, reason, workspaceId, workspaceName, repoName, computerName, sessionId, seq, focused, activities[], client info
-- Retry with exponential backoff: [1s, 2s, 5s, 10s, 30s]
 
-### Status Transitions
-- **Active**: User typed, edited, saved, or switched editor recently
-- **Idle**: Inactive for 5 minutes (`idleAfterSeconds`)
-- **Away**: Inactive for 15 minutes (`awayAfterSeconds`)
-- Window unfocus does NOT trigger instant away — Claude activity keeps presence active
+- Endpoint: `http://127.0.0.1:3000/api/presence`
+- Interval:
+  - Active: every 30 seconds.
+  - Idle/Away: every 60 seconds.
+- Payload includes status, reason, workspace identity, machine identity, sequencing, focus, and optional `activities[]`.
+- Retries use exponential backoff: `1s, 2s, 5s, 10s, 30s`.
 
-### Claude Code Activity Tracking
-- Watches JSONL transcript files in `~/.claude/projects/[workspace-slug]/`
-- Parses assistant message content blocks to classify activity type
-- Tool classifications: Read, Glob, Edit, Write, Bash, Grep, Task, WebSearch, WebFetch
-- Batches up to 10 events per 1000ms
-- Activities expire after 10 minutes (not sent in subsequent heartbeats)
-- Enabled by default, configurable via settings
-- Activity source: `"claude_code"`
+### Status transitions
 
-### Git Commit Tracking
-- Watches `.git/refs/heads/` and `.git/HEAD` via `fs.watch`
-- Runs `git log -1` on change to extract short hash, subject, branch
-- Debounced 500ms; initial hash seeded on startup to avoid false positives
-- Sent as activities with source: `"git"`, type: `"editing"`, summary: `"Committed: {subject}"`
-- Enabled by default, configurable via settings
+- `active`: recent edit/save/focus/editor activity.
+- `idle`: no activity for `idleAfterSeconds` (default 300s).
+- `away`: no activity for `awayAfterSeconds` (default 900s).
+
+### Claude Code activity tracking
+
+- Watches `~/.claude/projects/[workspace-slug]/*.jsonl`.
+- Parses assistant content blocks and classifies tool usage:
+  - `Read`, `Glob`, `Edit`, `Write`, `Bash`, `Grep`, `Task`, `WebSearch`, `WebFetch`.
+- Source in payload: `"claude_code"`.
+- Enabled by default (`weekendmode.claudeCode.enabled`).
+
+### OpenAI Codex activity tracking
+
+- Watches `~/.codex/sessions/**/*.jsonl` (or `weekendmode.codex.transcriptPath` override).
+- Tracks only sessions whose `cwd` matches the current workspace.
+- Parses:
+  - `response_item` / `function_call` for tool activity.
+  - `event_msg` / `agent_reasoning` for thinking activity.
+- Source in payload: `"codex"`.
+- Enabled by default (`weekendmode.codex.enabled`).
+
+### Git commit tracking
+
+- Watches `.git/refs/heads/` and `.git/HEAD` using `fs.watch`.
+- Runs `git log -1` on change to get hash, subject, branch.
+- Sends activity source `"git"` with summary `Committed: {subject}`.
+- Enabled by default (`weekendmode.gitCommits.enabled`).
 
 ## Project Structure
 
-```
+```text
 src/
-├── extension.ts          # Activation: creates sessionId, starts all services
-├── heartbeat.ts          # HTTP client sending presence payloads with retry
-├── presence.ts           # User activity tracking, status transitions
-├── workspace.ts          # Workspace identity: workspaceId, git repo resolution
-├── claudeWatcher.ts      # Claude Code transcript file watcher + parser
-├── gitWatcher.ts         # Git commit watcher via .git/refs fs.watch
-└── statusBar.ts          # VS Code status bar item showing connection state
+|- extension.ts      # Activation, wiring, commands, configuration handling
+|- heartbeat.ts      # HTTP heartbeats + retry/backoff + activity payloads
+|- presence.ts       # Presence state machine and editor/focus event tracking
+|- workspace.ts      # Workspace identity and repository metadata
+|- claudeWatcher.ts  # Claude transcript watcher/parser
+|- codexWatcher.ts   # Codex sessions watcher/parser
+|- gitWatcher.ts     # Git refs watcher
+`- statusBar.ts      # Status bar UI state
 ```
 
 ## Gotchas
 
-- `computerName` is the only field shared across multiple VS Code instances from the same person. The web app uses it to aggregate sessions into one desk.
-- `sessionId` is ephemeral (new UUID on each activation). Don't use it as a stable user identifier.
-- The extension only talks to localhost:3000. The web app must be running locally for heartbeats to work.
+- `computerName` is the stable cross-session identity for desk aggregation.
+- `sessionId` is ephemeral. Do not use it as a stable person identifier.
+- The extension only posts to localhost (`127.0.0.1:3000`).

@@ -67,6 +67,16 @@
           "type": "string",
           "default": "",
           "description": "Override path to Claude Code transcript directory. Leave empty for auto-detection."
+        },
+        "weekendmode.codex.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable OpenAI Codex activity tracking (watches JSONL session files)."
+        },
+        "weekendmode.codex.transcriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to OpenAI Codex sessions directory. Leave empty for auto-detection (~/.codex/sessions)."
         }
       }
     }

@@ -4,6 +4,7 @@ import { PresenceTracker, PresenceStatus, ActivityReason } from './presence';
 import { HeartbeatService } from './heartbeat';
 import { StatusBarManager } from './statusBar';
 import { ClaudeCodeWatcher } from './claudeWatcher';
+import { CodexSessionWatcher } from './codexWatcher';
 import { GitCommitWatcher } from './gitWatcher';
 
 const PAUSE_STATE_KEY = 'weekendmode.paused';
@@ -12,6 +13,7 @@ let presenceTracker: PresenceTracker | undefined;
 let heartbeatService: HeartbeatService | undefined;
 let statusBarManager: StatusBarManager | undefined;
 let claudeWatcher: ClaudeCodeWatcher | undefined;
+let codexWatcher: CodexSessionWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -51,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await context.globalState.update(PAUSE_STATE_KEY, true);
     heartbeatService!.stop();
     claudeWatcher?.stop();
+    codexWatcher?.stop();
     gitWatcher?.stop();
     updateStatusBar(context);
   });
@@ -61,6 +64,9 @@ export function activate(context: vscode.ExtensionContext): void {
     heartbeatService!.start(state.status, state.reason);
     if (claudeWatcher) {
       claudeWatcher.start();
+    }
+    if (codexWatcher) {
+      codexWatcher.start();
     }
     if (gitWatcher) {
       gitWatcher.start();
@@ -100,6 +106,11 @@ export function activate(context: vscode.ExtensionContext): void {
         handleClaudeCodeConfigChange(context);
       }
 
+      // Handle OpenAI Codex enabled/disabled toggle
+      if (e.affectsConfiguration('weekendmode.codex')) {
+        handleCodexConfigChange(context);
+      }
+
       // Handle git commits enabled/disabled toggle
       if (e.affectsConfiguration('weekendmode.gitCommits')) {
         handleGitCommitsConfigChange(context);
@@ -116,6 +127,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Claude Code activity tracking (opt-in)
   initClaudeCodeTracking(context, isPaused);
+
+  // OpenAI Codex activity tracking (opt-in)
+  initCodexTracking(context, isPaused);
 
   // Git commit activity tracking
   initGitCommitTracking(context, isPaused);
@@ -204,6 +218,74 @@ function handleClaudeCodeConfigChange(
   updateStatusBar(context);
 }
 
+function initCodexTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  if (!config.get<boolean>('codex.enabled', true)) {
+    return;
+  }
+
+  codexWatcher = new CodexSessionWatcher();
+
+  codexWatcher.onActivityBatch((events) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    for (const event of events) {
+      heartbeatService!.setActivity(event, 'codex');
+    }
+    // Codex activity counts as user presence - keep status active
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    codexWatcher.start();
+  }
+
+  context.subscriptions.push(codexWatcher);
+}
+
+function handleCodexConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('weekendmode');
+  const enabled = config.get<boolean>('codex.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !codexWatcher) {
+    // Turning on
+    codexWatcher = new CodexSessionWatcher();
+
+    codexWatcher.onActivityBatch((events) => {
+      if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+      for (const event of events) {
+        heartbeatService!.setActivity(event, 'codex');
+      }
+      presenceTracker!.recordExternalActivity('task_start', false);
+      heartbeatService!.flushActivity();
+    });
+
+    if (!isPaused) {
+      codexWatcher.start();
+    }
+
+    context.subscriptions.push(codexWatcher);
+  } else if (!enabled && codexWatcher) {
+    // Turning off
+    codexWatcher.dispose();
+    codexWatcher = undefined;
+  } else if (enabled && codexWatcher) {
+    // Config changed (e.g. transcriptPath) - restart watcher
+    codexWatcher.stop();
+    if (!isPaused) {
+      codexWatcher.start();
+    }
+  }
+
+  updateStatusBar(context);
+}
+
 function initGitCommitTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
@@ -260,7 +342,8 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   const status = presenceTracker.getStatus();
   const connected = heartbeatService.isConnected();
   const claudeActive = claudeWatcher?.isWatching() ?? false;
-  statusBarManager.update(status, paused, connected, claudeActive);
+  const codexActive = codexWatcher?.isWatching() ?? false;
+  statusBarManager.update(status, paused, connected, claudeActive, codexActive);
 }
 
 export async function deactivate(): Promise<void> {
@@ -269,10 +352,12 @@ export async function deactivate(): Promise<void> {
   }
   heartbeatService?.dispose();
   claudeWatcher?.dispose();
+  codexWatcher?.dispose();
   gitWatcher?.dispose();
   presenceTracker = undefined;
   heartbeatService = undefined;
   statusBarManager = undefined;
   claudeWatcher = undefined;
+  codexWatcher = undefined;
   gitWatcher = undefined;
 }
