@@ -29,6 +29,9 @@ interface ActivityBlock {
   command: string | null;
   summary: string;
   source: string;
+  gitBranch?: string;
+  slug?: string;
+  isSidechain?: boolean;
 }
 
 interface HeartbeatPayload {
@@ -141,6 +144,9 @@ export class HeartbeatService {
       command: event.command,
       summary: event.summary,
       source,
+      ...(event.gitBranch && { gitBranch: event.gitBranch }),
+      ...(event.slug && { slug: event.slug }),
+      ...(event.isSidechain !== undefined && { isSidechain: event.isSidechain }),
     });
   }
 

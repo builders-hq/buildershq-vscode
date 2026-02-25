@@ -19,6 +19,9 @@ export interface ClaudeActivityEvent {
   filePath: string | null;
   command: string | null;
   summary: string;
+  gitBranch?: string;
+  slug?: string;
+  isSidechain?: boolean;
 }
 
 export type ActivityBatchCallback = (events: ClaudeActivityEvent[]) => void;
@@ -37,13 +40,20 @@ function truncate(value: string | undefined | null, maxLen: number): string | nu
   return value.length > maxLen ? value.slice(0, maxLen) : value;
 }
 
+interface RecordMeta {
+  timestamp: number;
+  claudeSessionId: string;
+  gitBranch?: string;
+  slug?: string;
+  isSidechain?: boolean;
+}
+
 function classifyToolUse(
   name: string,
   input: Record<string, unknown>,
-  timestamp: number,
-  sessionId: string,
+  meta: RecordMeta,
 ): ClaudeActivityEvent {
-  const base = { timestamp, claudeSessionId: sessionId };
+  const base = { ...meta };
 
   switch (name) {
     case 'Read':
@@ -71,8 +81,7 @@ function classifyToolUse(
 
 function classifyContentBlock(
   block: Record<string, unknown>,
-  timestamp: number,
-  sessionId: string,
+  meta: RecordMeta,
 ): ClaudeActivityEvent | null {
   const blockType = block.type as string | undefined;
 
@@ -82,8 +91,7 @@ function classifyContentBlock(
 
   if (blockType === 'text') {
     return {
-      timestamp,
-      claudeSessionId: sessionId,
+      ...meta,
       activityType: 'thinking',
       tool: null,
       filePath: null,
@@ -95,7 +103,7 @@ function classifyContentBlock(
   if (blockType === 'tool_use') {
     const name = (block.name as string) || '';
     const input = (block.input as Record<string, unknown>) || {};
-    return classifyToolUse(name, input, timestamp, sessionId);
+    return classifyToolUse(name, input, meta);
   }
 
   return null;
@@ -413,11 +421,17 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     const timestampStr = record.timestamp as string | undefined;
     const timestamp = timestampStr ? new Date(timestampStr).getTime() : Date.now();
 
-    const sessionId = (record.sessionId as string) || '';
+    const meta: RecordMeta = {
+      timestamp,
+      claudeSessionId: (record.sessionId as string) || '',
+      gitBranch: truncate(record.gitBranch as string, 256) ?? undefined,
+      slug: truncate(record.slug as string, 256) ?? undefined,
+      isSidechain: typeof record.isSidechain === 'boolean' ? record.isSidechain : undefined,
+    };
 
     for (const block of content) {
       if (typeof block !== 'object' || block === null) { continue; }
-      const event = classifyContentBlock(block as Record<string, unknown>, timestamp, sessionId);
+      const event = classifyContentBlock(block as Record<string, unknown>, meta);
       if (event) {
         this.enqueueEvent(event);
       }
