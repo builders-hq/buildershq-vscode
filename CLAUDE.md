@@ -31,6 +31,14 @@ A VS Code extension that tracks developer presence and sends heartbeats to the W
 - Batches up to 10 events per 1000ms
 - Activities expire after 10 minutes (not sent in subsequent heartbeats)
 - Enabled by default, configurable via settings
+- Activity source: `"claude_code"`
+
+### Git Commit Tracking
+- Watches `.git/refs/heads/` and `.git/HEAD` via `fs.watch`
+- Runs `git log -1` on change to extract short hash, subject, branch
+- Debounced 500ms; initial hash seeded on startup to avoid false positives
+- Sent as activities with source: `"git"`, type: `"editing"`, summary: `"Committed: {subject}"`
+- Enabled by default, configurable via settings
 
 ## Project Structure
 
@@ -40,7 +48,9 @@ src/
 ├── heartbeat.ts          # HTTP client sending presence payloads with retry
 ├── presence.ts           # User activity tracking, status transitions
 ├── workspace.ts          # Workspace identity: workspaceId, git repo resolution
-└── claudeWatcher.ts      # Claude Code transcript file watcher + parser
+├── claudeWatcher.ts      # Claude Code transcript file watcher + parser
+├── gitWatcher.ts         # Git commit watcher via .git/refs fs.watch
+└── statusBar.ts          # VS Code status bar item showing connection state
 ```
 
 ## Gotchas
