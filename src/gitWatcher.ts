@@ -15,12 +15,15 @@ export type GitCommitCallback = (event: GitCommitEvent) => void;
 export class GitCommitWatcher implements vscode.Disposable {
   private watchers: fs.FSWatcher[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  private pollTimer: ReturnType<typeof setInterval> | undefined;
   private lastSeenHash: string | null = null;
+  private seeded = false;
   private callback: GitCommitCallback | undefined;
   private started = false;
   private workspacePath: string | null = null;
 
   private static readonly DEBOUNCE_MS = 500;
+  private static readonly POLL_INTERVAL_MS = 30_000;
 
   onCommit(callback: GitCommitCallback): void {
     this.callback = callback;
@@ -37,6 +40,7 @@ export class GitCommitWatcher implements vscode.Disposable {
     const gitDir = path.join(this.workspacePath, '.git');
 
     // Seed lastSeenHash so activation doesn't fire a false event
+    // checkForNewCommit() is blocked until seed completes
     this.seedCurrentHash();
 
     // Watch refs/heads/ for branch ref updates (commits, rebases)
@@ -44,10 +48,16 @@ export class GitCommitWatcher implements vscode.Disposable {
 
     // Watch HEAD for checkout/switch events
     this.watchFile(path.join(gitDir, 'HEAD'));
+
+    // Polling fallback — catches commits missed by fs.watch (e.g. on Windows)
+    this.pollTimer = setInterval(() => {
+      if (this.seeded) { this.checkForNewCommit(); }
+    }, GitCommitWatcher.POLL_INTERVAL_MS);
   }
 
   stop(): void {
     this.started = false;
+    this.seeded = false;
     for (const w of this.watchers) {
       try { w.close(); } catch { /* ignore */ }
     }
@@ -55,6 +65,10 @@ export class GitCommitWatcher implements vscode.Disposable {
     if (this.debounceTimer !== undefined) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = undefined;
+    }
+    if (this.pollTimer !== undefined) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
     }
   }
 
@@ -91,15 +105,20 @@ export class GitCommitWatcher implements vscode.Disposable {
   }
 
   private seedCurrentHash(): void {
-    if (!this.workspacePath) { return; }
+    if (!this.workspacePath) {
+      this.seeded = true;
+      return;
+    }
     execFile('git', ['rev-parse', 'HEAD'], { cwd: this.workspacePath, timeout: 3000 },
       (err, stdout) => {
         if (!err) { this.lastSeenHash = stdout.trim(); }
+        this.seeded = true;
+        console.log(`[WeekendMode] Git watcher seeded: ${this.lastSeenHash?.slice(0, 8) ?? 'none'}`);
       });
   }
 
   private checkForNewCommit(): void {
-    if (!this.workspacePath) { return; }
+    if (!this.workspacePath || !this.seeded) { return; }
     execFile('git', ['log', '-1', '--format=%H%n%h%n%s%n%D'],
       { cwd: this.workspacePath, timeout: 3000 },
       (err, stdout) => {

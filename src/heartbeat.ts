@@ -242,8 +242,15 @@ export class HeartbeatService {
     };
 
     if (this.pendingActivities.size > 0) {
-      // New activity arrived — send it and remember for re-sending
-      this.lastSentActivities = Array.from(this.pendingActivities.values());
+      // Merge new activities with existing, keyed by claudeSessionId
+      const merged = new Map<string, ActivityBlock>();
+      for (const a of this.lastSentActivities) {
+        merged.set(a.claudeSessionId, a);
+      }
+      for (const [, block] of this.pendingActivities) {
+        merged.set(block.claudeSessionId, block);
+      }
+      this.lastSentActivities = Array.from(merged.values());
       this.lastActivityAt = Date.now();
       this.pendingActivities.clear();
       payload.activities = this.lastSentActivities;
