@@ -33,6 +33,12 @@ A VS Code extension that tracks developer presence and sends heartbeats to the W
 - Watches `~/.claude/projects/[workspace-slug]/*.jsonl`.
 - Parses assistant content blocks and classifies tool usage:
   - `Read`, `Glob`, `Edit`, `Write`, `Bash`, `Grep`, `Task`, `WebSearch`, `WebFetch`.
+- Extracts per-record metadata from transcript lines:
+  - `gitBranch`: the git branch active when the record was written.
+  - `slug`: conversation name (e.g., `jaunty-crunching-wreath`).
+  - `isSidechain`: `true` when the record comes from a sub-agent (Task tool).
+- Activities are keyed by `claudeSessionId` — one activity block per session.
+- Detects both Claude Code CLI and the Claude AI VS Code extension (same transcript format).
 - Source in payload: `"claude_code"`.
 - Enabled by default (`weekendmode.claudeCode.enabled`).
 
