@@ -22,6 +22,10 @@ export interface ClaudeActivityEvent {
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
+  gitCommitHash?: string;
+  aiModel?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type ActivityBatchCallback = (events: ClaudeActivityEvent[]) => void;
@@ -46,6 +50,9 @@ interface RecordMeta {
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
+  aiModel?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 function classifyToolUse(
@@ -421,12 +428,20 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     const timestampStr = record.timestamp as string | undefined;
     const timestamp = timestampStr ? new Date(timestampStr).getTime() : Date.now();
 
+    const aiModel = truncate(message.model as string, 64) ?? undefined;
+    const usage = message.usage as Record<string, unknown> | undefined;
+    const inputTokens = typeof usage?.input_tokens === 'number' ? usage.input_tokens : undefined;
+    const outputTokens = typeof usage?.output_tokens === 'number' ? usage.output_tokens : undefined;
+
     const meta: RecordMeta = {
       timestamp,
       claudeSessionId: (record.sessionId as string) || '',
       gitBranch: truncate(record.gitBranch as string, 256) ?? undefined,
       slug: truncate(record.slug as string, 256) ?? undefined,
       isSidechain: typeof record.isSidechain === 'boolean' ? record.isSidechain : undefined,
+      aiModel,
+      inputTokens,
+      outputTokens,
     };
 
     for (const block of content) {

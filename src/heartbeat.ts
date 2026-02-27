@@ -1,12 +1,28 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
+import * as path from 'path';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
 import { ClaudeActivityEvent } from './claudeWatcher';
 
 const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
 const CLIENT_TYPE = 'vscode';
-const CLIENT_VERSION = '1.0.0';
+const SCHEMA_VERSION = 1;
+
+function getClientVersion(): string {
+  return vscode.extensions.getExtension('appmakers.buildershq')?.packageJSON?.version ?? '0.0.0';
+}
+
+function getGitBranch(): string | null {
+  try {
+    const gitExt = vscode.extensions.getExtension('vscode.git');
+    if (!gitExt?.isActive) { return null; }
+    const api = gitExt.exports.getAPI(1);
+    return api.repositories[0]?.state.HEAD?.name ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const BACKOFF_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
@@ -23,6 +39,7 @@ function getIdleIntervalMs(): number {
 interface ActivityBlock {
   claudeSessionId: string;
   seq: number;
+  timestamp?: number;
   type: string;
   tool: string | null;
   filePath: string | null;
@@ -32,10 +49,23 @@ interface ActivityBlock {
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
+  gitCommitHash?: string;
+  aiModel?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
-interface HeartbeatPayload {
+export interface HeartbeatUser {
+  githubUserId: number;
+  githubLogin: string;
+  email: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+export interface HeartbeatPayload {
   timestamp: number;
+  schemaVersion: number;
   status: PresenceStatus;
   reason: ActivityReason;
   workspaceId: string;
@@ -46,11 +76,29 @@ interface HeartbeatPayload {
   sessionId: string;
   seq: number;
   focused: boolean;
+  platform: {
+    os: string;
+    arch: string;
+    vscodeVersion: string;
+  };
   client: {
     type: string;
     version: string;
   };
+  activeFileLanguage?: string | null;
+  activeFileExt?: string | null;
+  gitBranch?: string | null;
+  debugType?: string | null;
+  taskName?: string | null;
+  multiRootWorkspace?: boolean;
+  user?: HeartbeatUser;
   activities?: ActivityBlock[];
+}
+
+interface HeartbeatServiceOptions {
+  endpointUrl?: string;
+  getUser?: () => HeartbeatUser | undefined;
+  persistPayload?: (payload: HeartbeatPayload) => Promise<void>;
 }
 
 export class HeartbeatService {
@@ -76,16 +124,30 @@ export class HeartbeatService {
   private lastActivityAt: number = 0;
   private activitySeq: number = 0;
 
+  // External context
+  private currentDebugType: string | null = null;
+  private currentTaskName: string | null = null;
+
   private static readonly ACTIVITY_TTL_MS = 600_000; // 10 minutes
 
   // Network reliability
   private heartbeatInFlight: boolean = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private currentBackoffIndex: number = 0;
+  private endpointUrl: string;
+  private readonly getUser: (() => HeartbeatUser | undefined) | undefined;
+  private readonly persistPayload: ((payload: HeartbeatPayload) => Promise<void>) | undefined;
 
-  constructor(sessionId: string, getFocused: () => boolean) {
+  constructor(
+    sessionId: string,
+    getFocused: () => boolean,
+    options: HeartbeatServiceOptions = {},
+  ) {
     this.sessionId = sessionId;
     this.getFocused = getFocused;
+    this.endpointUrl = options.endpointUrl ?? ENDPOINT_URL;
+    this.getUser = options.getUser;
+    this.persistPayload = options.persistPayload;
   }
 
   async resolveRepoInfo(): Promise<void> {
@@ -138,6 +200,7 @@ export class HeartbeatService {
     this.pendingActivities.set(event.claudeSessionId, {
       claudeSessionId: event.claudeSessionId,
       seq: this.activitySeq,
+      timestamp: event.timestamp,
       type: event.activityType,
       tool: event.tool,
       filePath: event.filePath,
@@ -147,6 +210,10 @@ export class HeartbeatService {
       ...(event.gitBranch && { gitBranch: event.gitBranch }),
       ...(event.slug && { slug: event.slug }),
       ...(event.isSidechain !== undefined && { isSidechain: event.isSidechain }),
+      ...(event.gitCommitHash && { gitCommitHash: event.gitCommitHash }),
+      ...(event.aiModel && { aiModel: event.aiModel }),
+      ...(event.inputTokens !== undefined && { inputTokens: event.inputTokens }),
+      ...(event.outputTokens !== undefined && { outputTokens: event.outputTokens }),
     });
   }
 
@@ -156,6 +223,14 @@ export class HeartbeatService {
     }
   }
 
+  setDebugType(type: string | null): void {
+    this.currentDebugType = type;
+  }
+
+  setTaskName(name: string | null): void {
+    this.currentTaskName = name;
+  }
+
   async sendDeactivate(): Promise<void> {
     const workspaceId = getWorkspaceId();
     const workspaceName = getWorkspaceName();
@@ -163,6 +238,7 @@ export class HeartbeatService {
 
     const payload: HeartbeatPayload = {
       timestamp: Math.floor(Date.now() / 1000),
+      schemaVersion: SCHEMA_VERSION,
       status: 'offline' as PresenceStatus,
       reason: 'none',
       workspaceId,
@@ -173,15 +249,21 @@ export class HeartbeatService {
       sessionId: this.sessionId,
       seq: Number.MAX_SAFE_INTEGER,
       focused: false,
-      client: { type: CLIENT_TYPE, version: CLIENT_VERSION },
+      platform: { os: process.platform, arch: process.arch, vscodeVersion: vscode.version },
+      client: { type: CLIENT_TYPE, version: getClientVersion() },
     };
+    const user = this.getUser?.();
+    if (user) {
+      payload.user = user;
+    }
 
     console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending deactivation event`);
+    this.persist(payload);
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2_000);
-      await fetch(ENDPOINT_URL, {
+      await fetch(this.endpointUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -229,8 +311,17 @@ export class HeartbeatService {
 
     this.seq += 1;
 
+    const activeEditor = vscode.window.activeTextEditor;
+    const activeFileLanguage = activeEditor?.document.languageId ?? null;
+    const activeFileName = activeEditor?.document.fileName ?? '';
+    const activeFileExt = activeFileName ? (path.extname(activeFileName) || null) : null;
+    const gitBranch = getGitBranch();
+    const folders = vscode.workspace.workspaceFolders;
+    const multiRootWorkspace = (folders?.length ?? 0) > 1;
+
     const payload: HeartbeatPayload = {
       timestamp: Math.floor(Date.now() / 1000),
+      schemaVersion: SCHEMA_VERSION,
       status: this.currentStatus,
       reason: this.currentReason,
       workspaceId,
@@ -241,11 +332,19 @@ export class HeartbeatService {
       sessionId: this.sessionId,
       seq: this.seq,
       focused: this.getFocused(),
-      client: {
-        type: CLIENT_TYPE,
-        version: CLIENT_VERSION,
-      },
+      platform: { os: process.platform, arch: process.arch, vscodeVersion: vscode.version },
+      client: { type: CLIENT_TYPE, version: getClientVersion() },
+      activeFileLanguage,
+      activeFileExt,
+      gitBranch,
+      multiRootWorkspace,
+      ...(this.currentDebugType !== null && { debugType: this.currentDebugType }),
+      ...(this.currentTaskName !== null && { taskName: this.currentTaskName }),
     };
+    const user = this.getUser?.();
+    if (user) {
+      payload.user = user;
+    }
 
     if (this.pendingActivities.size > 0) {
       // Merge new activities with existing, keyed by claudeSessionId
@@ -273,6 +372,7 @@ export class HeartbeatService {
 
     const activityInfo = payload.activities ? ` activities=${payload.activities.length}` : '';
     console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
+    this.persist(payload);
     this.postPayload(payload);
   }
 
@@ -283,7 +383,7 @@ export class HeartbeatService {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5_000);
 
-      const res = await fetch(ENDPOINT_URL, {
+      const res = await fetch(this.endpointUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -343,5 +443,15 @@ export class HeartbeatService {
       clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
     }
+  }
+
+  private persist(payload: HeartbeatPayload): void {
+    if (!this.persistPayload) {
+      return;
+    }
+    void this.persistPayload(payload).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[BuildersHQ] Failed to persist heartbeat: ${message}`);
+    });
   }
 }

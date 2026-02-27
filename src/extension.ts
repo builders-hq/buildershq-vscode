@@ -1,11 +1,14 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { PresenceTracker, PresenceStatus, ActivityReason } from './presence';
-import { HeartbeatService } from './heartbeat';
+import { HeartbeatService, HeartbeatUser } from './heartbeat';
 import { StatusBarManager } from './statusBar';
 import { ClaudeCodeWatcher } from './claudeWatcher';
 import { CodexSessionWatcher } from './codexWatcher';
 import { GitCommitWatcher } from './gitWatcher';
+import { loadRuntimeConfig } from './env';
+import { MongoStore } from './mongoStore';
+import { GitHubAuthService } from './githubAuth';
 
 const PAUSE_STATE_KEY = 'buildershq.paused';
 
@@ -15,12 +18,26 @@ let statusBarManager: StatusBarManager | undefined;
 let claudeWatcher: ClaudeCodeWatcher | undefined;
 let codexWatcher: CodexSessionWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
+let mongoStore: MongoStore | undefined;
+let githubAuthService: GitHubAuthService | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const sessionId = randomUUID();
+  const runtimeConfigProvider = () => loadRuntimeConfig();
+
+  mongoStore = new MongoStore(runtimeConfigProvider);
+  githubAuthService = new GitHubAuthService(context, runtimeConfigProvider, mongoStore);
+  await githubAuthService.restoreSession();
 
   presenceTracker = new PresenceTracker();
-  heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused());
+  const cfg = vscode.workspace.getConfiguration('buildershq');
+  heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
+    endpointUrl: cfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence'),
+    getUser: () => getHeartbeatUser(),
+    persistPayload: async (payload) => {
+      await mongoStore?.saveHeartbeat(payload);
+    },
+  });
   heartbeatService.resolveRepoInfo().catch(() => { /* repoUrl stays null */ });
   statusBarManager = new StatusBarManager();
 
@@ -74,22 +91,60 @@ export function activate(context: vscode.ExtensionContext): void {
     updateStatusBar(context);
   });
 
+  const loginCmd = vscode.commands.registerCommand('buildershq.loginWithGitHub', async () => {
+    try {
+      const user = await githubAuthService!.login();
+      if (user) {
+        vscode.window.showInformationMessage(`BuildersHQ logged in as ${user.githubLogin}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`BuildersHQ GitHub login failed: ${message}`);
+    }
+    updateStatusBar(context);
+  });
+
+  const logoutCmd = vscode.commands.registerCommand('buildershq.logoutFromGitHub', async () => {
+    await githubAuthService!.logout();
+    vscode.window.showInformationMessage('BuildersHQ logged out from GitHub');
+    updateStatusBar(context);
+  });
+
   // Debug session activity detection
-  const debugStartSub = vscode.debug.onDidStartDebugSession(() => {
+  const debugStartSub = vscode.debug.onDidStartDebugSession((session) => {
+    heartbeatService!.setDebugType(session.type);
     presenceTracker!.recordExternalActivity('debug_start', true);
   });
 
   const debugStopSub = vscode.debug.onDidTerminateDebugSession(() => {
+    heartbeatService!.setDebugType(null);
     presenceTracker!.recordExternalActivity('debug_stop', false);
   });
 
   // Task activity detection (build/test)
-  const taskStartSub = vscode.tasks.onDidStartTaskProcess(() => {
+  const taskStartSub = vscode.tasks.onDidStartTaskProcess((e) => {
+    heartbeatService!.setTaskName(e.execution.task.name);
     presenceTracker!.recordExternalActivity('task_start', true);
   });
 
   const taskEndSub = vscode.tasks.onDidEndTaskProcess(() => {
+    heartbeatService!.setTaskName(null);
     presenceTracker!.recordExternalActivity('task_end', false);
+  });
+
+  // Manual save activity tracking (source: 'vscode')
+  const saveActivitySub = vscode.workspace.onDidSaveTextDocument((doc) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    const languageId = doc.languageId || null;
+    heartbeatService!.setActivity({
+      timestamp: Date.now(),
+      claudeSessionId: 'vscode:edit',
+      activityType: 'editing',
+      tool: null,
+      filePath: null,
+      command: null,
+      summary: languageId ? `Writing ${languageId}` : 'Writing code',
+    }, 'vscode');
   });
 
   // Restart heartbeat timer when configuration changes
@@ -142,11 +197,15 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBarManager,
     pauseCmd,
     resumeCmd,
+    loginCmd,
+    logoutCmd,
     debugStartSub,
     debugStopSub,
     taskStartSub,
     taskEndSub,
-    configChangeSub
+    saveActivitySub,
+    configChangeSub,
+    githubAuthService
   );
 }
 
@@ -302,11 +361,13 @@ function initGitCommitTracking(
     heartbeatService!.setActivity({
       timestamp: event.timestamp,
       claudeSessionId: 'git',
-      activityType: 'git_commit' as 'editing',
+      activityType: 'editing',
       tool: null,
-      filePath: event.branch,
+      filePath: null,
       command: null,
       summary: `Committed: ${event.subject}`,
+      gitBranch: event.branch ?? undefined,
+      gitCommitHash: event.shortHash,
     }, 'git');
     presenceTracker!.recordExternalActivity('save', false);
     heartbeatService!.flushActivity();
@@ -334,6 +395,21 @@ function handleGitCommitsConfigChange(
   }
 }
 
+function getHeartbeatUser(): HeartbeatUser | undefined {
+  const user = githubAuthService?.getUserProfile();
+  if (!user) {
+    return undefined;
+  }
+
+  return {
+    githubUserId: user.githubUserId,
+    githubLogin: user.githubLogin,
+    email: user.email,
+    name: user.name,
+    avatarUrl: user.avatarUrl,
+  };
+}
+
 function updateStatusBar(context: vscode.ExtensionContext): void {
   if (!presenceTracker || !heartbeatService || !statusBarManager) {
     return;
@@ -350,7 +426,9 @@ export async function deactivate(): Promise<void> {
   if (heartbeatService) {
     await heartbeatService.sendDeactivate();
   }
+  await mongoStore?.dispose();
   heartbeatService?.dispose();
+  githubAuthService?.dispose();
   claudeWatcher?.dispose();
   codexWatcher?.dispose();
   gitWatcher?.dispose();
@@ -360,4 +438,6 @@ export async function deactivate(): Promise<void> {
   claudeWatcher = undefined;
   codexWatcher = undefined;
   gitWatcher = undefined;
+  githubAuthService = undefined;
+  mongoStore = undefined;
 }

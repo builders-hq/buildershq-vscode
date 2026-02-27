@@ -540,7 +540,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
         tool: null,
         filePath: null,
         command: null,
-        summary: truncate(payload.text as string, 120) ?? 'Thinking',
+        summary: 'Thinking',
       });
     }
   }
