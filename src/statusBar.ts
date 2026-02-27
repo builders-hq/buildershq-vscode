@@ -4,19 +4,19 @@ import { PresenceStatus } from './presence';
 type DisplayKey = PresenceStatus | 'paused' | 'disconnected';
 
 const STATUS_LABELS: Record<DisplayKey, string> = {
-  active:       '$(pulse) WeekendMode: Active',
-  idle:         '$(clock) WeekendMode: Idle',
-  away:         '$(eye-closed) WeekendMode: Away',
-  paused:       '$(debug-pause) WeekendMode: Paused',
-  disconnected: '$(alert) WeekendMode: Not Connected',
+  active:       '$(pulse) BuildersHQ: Active',
+  idle:         '$(clock) BuildersHQ: Idle',
+  away:         '$(eye-closed) BuildersHQ: Away',
+  paused:       '$(debug-pause) BuildersHQ: Paused',
+  disconnected: '$(alert) BuildersHQ: Not Connected',
 };
 
 const STATUS_TOOLTIPS: Record<DisplayKey, string> = {
-  active:       'WeekendMode is tracking your presence (Active)',
-  idle:         'WeekendMode detected idle state',
-  away:         'WeekendMode detected away state',
-  paused:       'WeekendMode presence tracking is paused',
-  disconnected: 'WeekendMode cannot reach the presence server',
+  active:       'BuildersHQ is tracking your presence (Active)',
+  idle:         'BuildersHQ detected idle state',
+  away:         'BuildersHQ detected away state',
+  paused:       'BuildersHQ presence tracking is paused',
+  disconnected: 'BuildersHQ cannot reach the presence server',
 };
 
 export class StatusBarManager implements vscode.Disposable {
@@ -24,11 +24,11 @@ export class StatusBarManager implements vscode.Disposable {
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(
-      'weekendmode.status',
+      'buildershq.status',
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.statusBarItem.name = 'WeekendMode Status';
+    this.statusBarItem.name = 'BuildersHQ Status';
     this.statusBarItem.show();
   }
 
@@ -43,13 +43,13 @@ export class StatusBarManager implements vscode.Disposable {
 
     if (paused) {
       displayKey = 'paused';
-      this.statusBarItem.command = 'weekendmode.resume';
+      this.statusBarItem.command = 'buildershq.resume';
     } else if (!connected) {
       displayKey = 'disconnected';
       this.statusBarItem.command = undefined;
     } else {
       displayKey = status;
-      this.statusBarItem.command = 'weekendmode.pause';
+      this.statusBarItem.command = 'buildershq.pause';
     }
 
     this.statusBarItem.text = STATUS_LABELS[displayKey];

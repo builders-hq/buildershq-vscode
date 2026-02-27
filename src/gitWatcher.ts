@@ -113,7 +113,7 @@ export class GitCommitWatcher implements vscode.Disposable {
       (err, stdout) => {
         if (!err) { this.lastSeenHash = stdout.trim(); }
         this.seeded = true;
-        console.log(`[WeekendMode] Git watcher seeded: ${this.lastSeenHash?.slice(0, 8) ?? 'none'}`);
+        console.log(`[BuildersHQ] Git watcher seeded: ${this.lastSeenHash?.slice(0, 8) ?? 'none'}`);
       });
   }
 
@@ -135,7 +135,7 @@ export class GitCommitWatcher implements vscode.Disposable {
         const branchMatch = refs.match(/HEAD -> ([^,]+)/);
         const branch = branchMatch ? branchMatch[1].trim() : null;
 
-        console.log(`[WeekendMode] Git commit detected: ${shortHash} "${subject}" on ${branch ?? 'detached'}`);
+        console.log(`[BuildersHQ] Git commit detected: ${shortHash} "${subject}" on ${branch ?? 'detached'}`);
 
         if (this.callback) {
           this.callback({

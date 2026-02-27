@@ -7,7 +7,7 @@ import { ClaudeCodeWatcher } from './claudeWatcher';
 import { CodexSessionWatcher } from './codexWatcher';
 import { GitCommitWatcher } from './gitWatcher';
 
-const PAUSE_STATE_KEY = 'weekendmode.paused';
+const PAUSE_STATE_KEY = 'buildershq.paused';
 
 let presenceTracker: PresenceTracker | undefined;
 let heartbeatService: HeartbeatService | undefined;
@@ -49,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Pause / Resume commands
-  const pauseCmd = vscode.commands.registerCommand('weekendmode.pause', async () => {
+  const pauseCmd = vscode.commands.registerCommand('buildershq.pause', async () => {
     await context.globalState.update(PAUSE_STATE_KEY, true);
     heartbeatService!.stop();
     claudeWatcher?.stop();
@@ -58,7 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
     updateStatusBar(context);
   });
 
-  const resumeCmd = vscode.commands.registerCommand('weekendmode.resume', async () => {
+  const resumeCmd = vscode.commands.registerCommand('buildershq.resume', async () => {
     await context.globalState.update(PAUSE_STATE_KEY, false);
     const state = presenceTracker!.getState();
     heartbeatService!.start(state.status, state.reason);
@@ -94,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Restart heartbeat timer when configuration changes
   const configChangeSub = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration('weekendmode')) {
+    if (e.affectsConfiguration('buildershq')) {
       // Existing heartbeat reconfiguration
       if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
         const state = presenceTracker!.getState();
@@ -102,17 +102,17 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       // Handle Claude Code enabled/disabled toggle
-      if (e.affectsConfiguration('weekendmode.claudeCode')) {
+      if (e.affectsConfiguration('buildershq.claudeCode')) {
         handleClaudeCodeConfigChange(context);
       }
 
       // Handle OpenAI Codex enabled/disabled toggle
-      if (e.affectsConfiguration('weekendmode.codex')) {
+      if (e.affectsConfiguration('buildershq.codex')) {
         handleCodexConfigChange(context);
       }
 
       // Handle git commits enabled/disabled toggle
-      if (e.affectsConfiguration('weekendmode.gitCommits')) {
+      if (e.affectsConfiguration('buildershq.gitCommits')) {
         handleGitCommitsConfigChange(context);
       }
     }
@@ -154,7 +154,7 @@ function initClaudeCodeTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   if (!config.get<boolean>('claudeCode.enabled', true)) {
     return;
   }
@@ -181,7 +181,7 @@ function initClaudeCodeTracking(
 function handleClaudeCodeConfigChange(
   context: vscode.ExtensionContext,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   const enabled = config.get<boolean>('claudeCode.enabled', true);
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
 
@@ -222,7 +222,7 @@ function initCodexTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   if (!config.get<boolean>('codex.enabled', true)) {
     return;
   }
@@ -249,7 +249,7 @@ function initCodexTracking(
 function handleCodexConfigChange(
   context: vscode.ExtensionContext,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   const enabled = config.get<boolean>('codex.enabled', true);
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
 
@@ -290,7 +290,7 @@ function initGitCommitTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   if (!config.get<boolean>('gitCommits.enabled', true)) {
     return;
   }
@@ -322,7 +322,7 @@ function initGitCommitTracking(
 function handleGitCommitsConfigChange(
   context: vscode.ExtensionContext,
 ): void {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   const enabled = config.get<boolean>('gitCommits.enabled', true);
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
 

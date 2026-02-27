@@ -1,4 +1,4 @@
-# WeekendMode
+# BuildersHQ
 
 Presence detection for VS Code. Tracks developer activity and reports status (`active`, `idle`, `away`) to a configurable endpoint.
 
@@ -17,32 +17,32 @@ Presence detection for VS Code. Tracks developer activity and reports status (`a
 
 | State | Display |
 |-------|---------|
-| Active | `WeekendMode: Active` |
-| Idle | `WeekendMode: Idle` |
-| Away | `WeekendMode: Away` |
-| Paused | `WeekendMode: Paused` |
-| Disconnected | `WeekendMode: Not Connected` |
+| Active | `BuildersHQ: Active` |
+| Idle | `BuildersHQ: Idle` |
+| Away | `BuildersHQ: Away` |
+| Paused | `BuildersHQ: Paused` |
+| Disconnected | `BuildersHQ: Not Connected` |
 
 When Claude/Codex activity is being detected, a sparkle icon is added to the status item tooltip.
 
 ## Commands
 
-- `WeekendMode: Pause Presence Tracking`
-- `WeekendMode: Resume Presence Tracking`
+- `BuildersHQ: Pause Presence Tracking`
+- `BuildersHQ: Resume Presence Tracking`
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `weekendmode.idleAfterSeconds` | `300` | Seconds of inactivity before status becomes idle. |
-| `weekendmode.awayAfterSeconds` | `900` | Seconds of inactivity before status becomes away. |
-| `weekendmode.heartbeatActiveSeconds` | `30` | Heartbeat interval while active. |
-| `weekendmode.heartbeatIdleSeconds` | `60` | Heartbeat interval while idle/away. |
-| `weekendmode.gitCommits.enabled` | `true` | Track git commits as developer activity. |
-| `weekendmode.claudeCode.enabled` | `true` | Track Claude Code transcript activity. |
-| `weekendmode.claudeCode.transcriptPath` | `""` | Override Claude transcript directory. |
-| `weekendmode.codex.enabled` | `true` | Track OpenAI Codex session activity. |
-| `weekendmode.codex.transcriptPath` | `""` | Override Codex sessions directory. |
+| `buildershq.idleAfterSeconds` | `300` | Seconds of inactivity before status becomes idle. |
+| `buildershq.awayAfterSeconds` | `900` | Seconds of inactivity before status becomes away. |
+| `buildershq.heartbeatActiveSeconds` | `30` | Heartbeat interval while active. |
+| `buildershq.heartbeatIdleSeconds` | `60` | Heartbeat interval while idle/away. |
+| `buildershq.gitCommits.enabled` | `true` | Track git commits as developer activity. |
+| `buildershq.claudeCode.enabled` | `true` | Track Claude Code transcript activity. |
+| `buildershq.claudeCode.transcriptPath` | `""` | Override Claude transcript directory. |
+| `buildershq.codex.enabled` | `true` | Track OpenAI Codex session activity. |
+| `buildershq.codex.transcriptPath` | `""` | Override Codex sessions directory. |
 
 ## Payload Format
 
@@ -58,7 +58,7 @@ When Claude/Codex activity is being detected, a sparkle icon is added to the sta
   "focused": true,
   "client": {
     "type": "vscode",
-    "version": "0.2.0"
+    "version": "1.0.0"
   },
   "activities": [
     {

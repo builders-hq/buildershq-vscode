@@ -6,17 +6,17 @@ import { ClaudeActivityEvent } from './claudeWatcher';
 
 const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
 const CLIENT_TYPE = 'vscode';
-const CLIENT_VERSION = '0.2.0';
+const CLIENT_VERSION = '1.0.0';
 
 const BACKOFF_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 function getActiveIntervalMs(): number {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   return config.get<number>('heartbeatActiveSeconds', 30) * 1000;
 }
 
 function getIdleIntervalMs(): number {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   return config.get<number>('heartbeatIdleSeconds', 60) * 1000;
 }
 
@@ -176,7 +176,7 @@ export class HeartbeatService {
       client: { type: CLIENT_TYPE, version: CLIENT_VERSION },
     };
 
-    console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Sending deactivation event`);
+    console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending deactivation event`);
 
     try {
       const controller = new AbortController();
@@ -223,7 +223,7 @@ export class HeartbeatService {
     const workspaceName = getWorkspaceName();
 
     if (!workspaceId || !workspaceName) {
-      console.log('[WeekendMode] No workspace open, skipping heartbeat');
+      console.log('[BuildersHQ] No workspace open, skipping heartbeat');
       return;
     }
 
@@ -272,7 +272,7 @@ export class HeartbeatService {
     }
 
     const activityInfo = payload.activities ? ` activities=${payload.activities.length}` : '';
-    console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
+    console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
     this.postPayload(payload);
   }
 
@@ -293,7 +293,7 @@ export class HeartbeatService {
       clearTimeout(timeout);
 
       const success = res.status < 500;
-      console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
+      console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
 
       this.heartbeatInFlight = false;
       const wasConnected = this.connected;
@@ -311,7 +311,7 @@ export class HeartbeatService {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode] ${new Date().toLocaleTimeString()} Request error: ${msg}`);
+      console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Request error: ${msg}`);
       this.heartbeatInFlight = false;
 
       const wasConnected = this.connected;
@@ -330,7 +330,7 @@ export class HeartbeatService {
     const delayMs = BACKOFF_DELAYS_MS[Math.min(this.currentBackoffIndex, BACKOFF_DELAYS_MS.length - 1)];
     this.currentBackoffIndex += 1;
 
-    console.log(`[WeekendMode] Scheduling retry in ${delayMs}ms (attempt ${this.currentBackoffIndex})`);
+    console.log(`[BuildersHQ] Scheduling retry in ${delayMs}ms (attempt ${this.currentBackoffIndex})`);
 
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;

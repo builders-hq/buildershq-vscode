@@ -4,10 +4,7 @@
 			"path": "."
 		},
 		{
-			"path": "../weekendmode"
-		},
-		{
-			"path": "../pixel-agents"
+			"path": "../buildershq"
 		}
 	],
 	"settings": {}

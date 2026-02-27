@@ -1,8 +1,8 @@
-# WeekendMode VS Code Extension
+# BuildersHQ VS Code Extension
 
 ## What is this?
 
-A VS Code extension that tracks developer presence and sends heartbeats to the WeekendMode web app (`c:\appmakers\weekendmode`).
+A VS Code extension that tracks developer presence and sends heartbeats to the BuildersHQ web app (`c:\appmakers\buildershq`).
 
 ## Key Concepts
 
@@ -40,24 +40,24 @@ A VS Code extension that tracks developer presence and sends heartbeats to the W
 - Activities are keyed by `claudeSessionId` — one activity block per session.
 - Detects both Claude Code CLI and the Claude AI VS Code extension (same transcript format).
 - Source in payload: `"claude_code"`.
-- Enabled by default (`weekendmode.claudeCode.enabled`).
+- Enabled by default (`buildershq.claudeCode.enabled`).
 
 ### OpenAI Codex activity tracking
 
-- Watches `~/.codex/sessions/**/*.jsonl` (or `weekendmode.codex.transcriptPath` override).
+- Watches `~/.codex/sessions/**/*.jsonl` (or `buildershq.codex.transcriptPath` override).
 - Tracks only sessions whose `cwd` matches the current workspace.
 - Parses:
   - `response_item` / `function_call` for tool activity.
   - `event_msg` / `agent_reasoning` for thinking activity.
 - Source in payload: `"codex"`.
-- Enabled by default (`weekendmode.codex.enabled`).
+- Enabled by default (`buildershq.codex.enabled`).
 
 ### Git commit tracking
 
 - Watches `.git/refs/heads/` and `.git/HEAD` using `fs.watch`.
 - Runs `git log -1` on change to get hash, subject, branch.
 - Sends activity source `"git"` with summary `Committed: {subject}`.
-- Enabled by default (`weekendmode.gitCommits.enabled`).
+- Enabled by default (`buildershq.gitCommits.enabled`).
 
 ## Project Structure
 

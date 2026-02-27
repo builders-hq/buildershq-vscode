@@ -10,12 +10,12 @@ const MIN_STATE_DURATION_MS = 15_000;
 const FOCUS_DEBOUNCE_MS = 10_000;
 
 function getActiveThresholdMs(): number {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   return config.get<number>('idleAfterSeconds', 300) * 1000;
 }
 
 function getIdleThresholdMs(): number {
-  const config = vscode.workspace.getConfiguration('weekendmode');
+  const config = vscode.workspace.getConfiguration('buildershq');
   return config.get<number>('awayAfterSeconds', 900) * 1000;
 }
 

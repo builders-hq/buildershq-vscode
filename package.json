@@ -1,8 +1,8 @@
 {
-  "name": "weekendmode",
-  "displayName": "WeekendMode",
+  "name": "buildershq",
+  "displayName": "BuildersHQ",
   "description": "Presence detection extension that reports developer activity status",
-  "version": "0.1.5",
+  "version": "1.0.0",
   "publisher": "appmakers",
   "license": "MIT",
   "engines": {
@@ -18,62 +18,62 @@
   "contributes": {
     "commands": [
       {
-        "command": "weekendmode.pause",
-        "title": "WeekendMode: Pause Presence Tracking"
+        "command": "buildershq.pause",
+        "title": "BuildersHQ: Pause Presence Tracking"
       },
       {
-        "command": "weekendmode.resume",
-        "title": "WeekendMode: Resume Presence Tracking"
+        "command": "buildershq.resume",
+        "title": "BuildersHQ: Resume Presence Tracking"
       }
     ],
     "configuration": {
-      "title": "WeekendMode",
+      "title": "BuildersHQ",
       "properties": {
-        "weekendmode.idleAfterSeconds": {
+        "buildershq.idleAfterSeconds": {
           "type": "number",
           "default": 300,
           "minimum": 10,
           "description": "Seconds of inactivity before status becomes idle."
         },
-        "weekendmode.awayAfterSeconds": {
+        "buildershq.awayAfterSeconds": {
           "type": "number",
           "default": 900,
           "minimum": 30,
           "description": "Seconds of inactivity before status becomes away."
         },
-        "weekendmode.heartbeatActiveSeconds": {
+        "buildershq.heartbeatActiveSeconds": {
           "type": "number",
           "default": 30,
           "minimum": 10,
           "description": "How often (in seconds) to send heartbeats while active."
         },
-        "weekendmode.heartbeatIdleSeconds": {
+        "buildershq.heartbeatIdleSeconds": {
           "type": "number",
           "default": 60,
           "minimum": 30,
           "description": "How often (in seconds) to send heartbeats while idle."
         },
-        "weekendmode.gitCommits.enabled": {
+        "buildershq.gitCommits.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Track git commits as developer activity."
         },
-        "weekendmode.claudeCode.enabled": {
+        "buildershq.claudeCode.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable Claude Code activity tracking (watches JSONL transcript files)."
         },
-        "weekendmode.claudeCode.transcriptPath": {
+        "buildershq.claudeCode.transcriptPath": {
           "type": "string",
           "default": "",
           "description": "Override path to Claude Code transcript directory. Leave empty for auto-detection."
         },
-        "weekendmode.codex.enabled": {
+        "buildershq.codex.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable OpenAI Codex activity tracking (watches JSONL session files)."
         },
-        "weekendmode.codex.transcriptPath": {
+        "buildershq.codex.transcriptPath": {
           "type": "string",
           "default": "",
           "description": "Override path to OpenAI Codex sessions directory. Leave empty for auto-detection (~/.codex/sessions)."

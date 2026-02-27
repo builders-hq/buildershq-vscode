@@ -162,7 +162,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
   // --- Private: file detection ---
 
   private resolveTranscriptDir(): string | null {
-    const config = vscode.workspace.getConfiguration('weekendmode');
+    const config = vscode.workspace.getConfiguration('buildershq');
     const overridePath = config.get<string>('claudeCode.transcriptPath', '');
     if (overridePath) {
       return overridePath;
@@ -205,13 +205,13 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
   private async findAndWatchAll(): Promise<void> {
     const dir = this.resolveTranscriptDir();
     if (!dir) {
-      console.log('[WeekendMode:Claude] No workspace open, cannot detect transcript directory');
+      console.log('[BuildersHQ:Claude] No workspace open, cannot detect transcript directory');
       return;
     }
 
     const activeFiles = await this.findActiveJsonlFiles(dir);
     if (activeFiles.length === 0) {
-      console.log(`[WeekendMode:Claude] No active JSONL files found in ${dir}, will retry in 30s`);
+      console.log(`[BuildersHQ:Claude] No active JSONL files found in ${dir}, will retry in 30s`);
       return;
     }
 
@@ -234,7 +234,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     // Detach stale files
     for (const filePath of this.trackedFiles.keys()) {
       if (!activeSet.has(filePath)) {
-        console.log(`[WeekendMode:Claude] Detaching stale transcript: ${path.basename(filePath)}`);
+        console.log(`[BuildersHQ:Claude] Detaching stale transcript: ${path.basename(filePath)}`);
         this.detachFile(filePath);
       }
     }
@@ -242,7 +242,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     // Attach new files
     for (const filePath of activeFiles) {
       if (!this.trackedFiles.has(filePath)) {
-        console.log(`[WeekendMode:Claude] Attaching new transcript: ${path.basename(filePath)}`);
+        console.log(`[BuildersHQ:Claude] Attaching new transcript: ${path.basename(filePath)}`);
         await this.attachToFile(filePath);
       }
     }
@@ -274,10 +274,10 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
       }
 
       this.setupWatcher(tracked);
-      console.log(`[WeekendMode:Claude] Watching: ${filePath}`);
+      console.log(`[BuildersHQ:Claude] Watching: ${filePath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode:Claude] Failed to attach to file: ${msg}`);
+      console.log(`[BuildersHQ:Claude] Failed to attach to file: ${msg}`);
       this.trackedFiles.delete(filePath);
     }
   }
@@ -306,13 +306,13 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
         if (eventType === 'change') {
           this.debouncedRead(tracked);
         } else if (eventType === 'rename') {
-          console.log(`[WeekendMode:Claude] Transcript file renamed/deleted: ${path.basename(tracked.filePath)}`);
+          console.log(`[BuildersHQ:Claude] Transcript file renamed/deleted: ${path.basename(tracked.filePath)}`);
           this.detachFile(tracked.filePath);
         }
       });
 
       tracked.fsWatcher.on('error', (err) => {
-        console.log(`[WeekendMode:Claude] fs.watch error on ${path.basename(tracked.filePath)}: ${err.message}, falling back to polling`);
+        console.log(`[BuildersHQ:Claude] fs.watch error on ${path.basename(tracked.filePath)}: ${err.message}, falling back to polling`);
         if (tracked.fsWatcher) {
           tracked.fsWatcher.close();
           tracked.fsWatcher = null;
@@ -320,7 +320,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
         this.startPolling(tracked);
       });
     } catch {
-      console.log(`[WeekendMode:Claude] fs.watch failed for ${path.basename(tracked.filePath)}, falling back to polling`);
+      console.log(`[BuildersHQ:Claude] fs.watch failed for ${path.basename(tracked.filePath)}, falling back to polling`);
       this.startPolling(tracked);
     }
   }
@@ -392,7 +392,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode:Claude] Read error on ${path.basename(tracked.filePath)}: ${msg}`);
+      console.log(`[BuildersHQ:Claude] Read error on ${path.basename(tracked.filePath)}: ${msg}`);
     } finally {
       if (fd) {
         await fd.close().catch(() => {});

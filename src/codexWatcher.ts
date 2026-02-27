@@ -224,7 +224,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
   }
 
   private resolveSessionsDir(): string {
-    const config = vscode.workspace.getConfiguration('weekendmode');
+    const config = vscode.workspace.getConfiguration('buildershq');
     const overridePath = config.get<string>('codex.transcriptPath', '');
     if (overridePath) {
       return overridePath;
@@ -278,7 +278,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
 
   private async findAndWatchAll(): Promise<void> {
     if (!this.workspacePath) {
-      console.log('[WeekendMode:Codex] No workspace open, skipping Codex session tracking');
+      console.log('[BuildersHQ:Codex] No workspace open, skipping Codex session tracking');
       return;
     }
 
@@ -286,7 +286,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
     const activeFiles = await this.findActiveJsonlFiles(dir);
 
     if (activeFiles.length === 0) {
-      console.log(`[WeekendMode:Codex] No active JSONL files found in ${dir}, will retry in 30s`);
+      console.log(`[BuildersHQ:Codex] No active JSONL files found in ${dir}, will retry in 30s`);
       return;
     }
 
@@ -312,14 +312,14 @@ export class CodexSessionWatcher implements vscode.Disposable {
 
     for (const filePath of this.trackedFiles.keys()) {
       if (!activeSet.has(filePath)) {
-        console.log(`[WeekendMode:Codex] Detaching stale session: ${path.basename(filePath)}`);
+        console.log(`[BuildersHQ:Codex] Detaching stale session: ${path.basename(filePath)}`);
         this.detachFile(filePath);
       }
     }
 
     for (const filePath of activeFiles) {
       if (!this.trackedFiles.has(filePath)) {
-        console.log(`[WeekendMode:Codex] Attaching new session: ${path.basename(filePath)}`);
+        console.log(`[BuildersHQ:Codex] Attaching new session: ${path.basename(filePath)}`);
         await this.attachToFile(filePath);
       }
     }
@@ -352,10 +352,10 @@ export class CodexSessionWatcher implements vscode.Disposable {
       }
 
       this.setupWatcher(tracked);
-      console.log(`[WeekendMode:Codex] Watching: ${filePath}`);
+      console.log(`[BuildersHQ:Codex] Watching: ${filePath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode:Codex] Failed to attach to file: ${msg}`);
+      console.log(`[BuildersHQ:Codex] Failed to attach to file: ${msg}`);
       this.trackedFiles.delete(filePath);
     }
   }
@@ -382,13 +382,13 @@ export class CodexSessionWatcher implements vscode.Disposable {
         if (eventType === 'change') {
           this.debouncedRead(tracked);
         } else if (eventType === 'rename') {
-          console.log(`[WeekendMode:Codex] Session file renamed/deleted: ${path.basename(tracked.filePath)}`);
+          console.log(`[BuildersHQ:Codex] Session file renamed/deleted: ${path.basename(tracked.filePath)}`);
           this.detachFile(tracked.filePath);
         }
       });
 
       tracked.fsWatcher.on('error', (err) => {
-        console.log(`[WeekendMode:Codex] fs.watch error on ${path.basename(tracked.filePath)}: ${err.message}, falling back to polling`);
+        console.log(`[BuildersHQ:Codex] fs.watch error on ${path.basename(tracked.filePath)}: ${err.message}, falling back to polling`);
         if (tracked.fsWatcher) {
           tracked.fsWatcher.close();
           tracked.fsWatcher = null;
@@ -396,7 +396,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
         this.startPolling(tracked);
       });
     } catch {
-      console.log(`[WeekendMode:Codex] fs.watch failed for ${path.basename(tracked.filePath)}, falling back to polling`);
+      console.log(`[BuildersHQ:Codex] fs.watch failed for ${path.basename(tracked.filePath)}, falling back to polling`);
       this.startPolling(tracked);
     }
   }
@@ -461,7 +461,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[WeekendMode:Codex] Read error on ${path.basename(tracked.filePath)}: ${msg}`);
+      console.log(`[BuildersHQ:Codex] Read error on ${path.basename(tracked.filePath)}: ${msg}`);
     } finally {
       if (fd) {
         await fd.close().catch(() => {});
