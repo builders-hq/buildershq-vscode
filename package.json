@@ -59,8 +59,8 @@
       "properties": {
         "buildershq.serverUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:3000/api/presence",
-          "description": "URL of the BuildersHQ presence API endpoint. Defaults to localhost for self-hosted setups."
+          "default": "https://buildershq.net/api/presence",
+          "description": "URL of the BuildersHQ presence API endpoint."
         },
         "buildershq.idleAfterSeconds": {
           "type": "number",

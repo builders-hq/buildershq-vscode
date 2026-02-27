@@ -33,7 +33,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const cfg = vscode.workspace.getConfiguration('buildershq');
   const runtimeCfg = loadRuntimeConfig();
   const endpointUrl = runtimeCfg.presenceServerUrl ||
-    cfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence');
+    cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
     getUser: () => getHeartbeatUser(),

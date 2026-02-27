@@ -5,7 +5,7 @@ import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
 import { ClaudeActivityEvent } from './claudeWatcher';
 
-const ENDPOINT_URL = 'http://127.0.0.1:3000/api/presence';
+const ENDPOINT_URL = 'https://buildershq.net/api/presence';
 const CLIENT_TYPE = 'vscode';
 const SCHEMA_VERSION = 1;
 
