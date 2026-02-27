@@ -2,7 +2,7 @@
 
 ## What is this?
 
-A VS Code extension that tracks developer presence and sends heartbeats to the BuildersHQ web app (`c:\appmakers\buildershq`).
+A VS Code extension that tracks developer presence and sends heartbeats to a BuildersHQ server.
 
 ## Key Concepts
 
