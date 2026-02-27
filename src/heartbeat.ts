@@ -194,6 +194,10 @@ export class HeartbeatService {
     return this.connected;
   }
 
+  setEndpointUrl(url: string): void {
+    this.endpointUrl = url;
+  }
+
   setActivity(event: ClaudeActivityEvent, source: string = 'claude_code'): void {
     this.activitySeq += 1;
     this.lastActivityAt = Date.now();

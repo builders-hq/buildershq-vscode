@@ -13,6 +13,7 @@ export interface RuntimeConfig {
   githubClientSecret: string;
   mongodbUri: string;
   mongodbDb: string;
+  presenceServerUrl: string;
 }
 
 function resolveEnvPath(configuredPath: string): string {
@@ -48,5 +49,6 @@ export function loadRuntimeConfig(): RuntimeConfig {
     mongodbUri: parsed.MONGODB_URI ?? '',
     // Force BuildersHQ as requested, regardless of MONGODB_DB in the shared file.
     mongodbDb: FORCED_DB_NAME,
+    presenceServerUrl: parsed.PRESENCE_SERVER_URL?.trim() ?? '',
   };
 }

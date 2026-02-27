@@ -31,8 +31,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   presenceTracker = new PresenceTracker();
   const cfg = vscode.workspace.getConfiguration('buildershq');
+  const runtimeCfg = loadRuntimeConfig();
+  const endpointUrl = runtimeCfg.presenceServerUrl ||
+    cfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence');
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
-    endpointUrl: cfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence'),
+    endpointUrl,
     getUser: () => getHeartbeatUser(),
     persistPayload: async (payload) => {
       await mongoStore?.saveHeartbeat(payload);
@@ -150,6 +153,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Restart heartbeat timer when configuration changes
   const configChangeSub = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('buildershq')) {
+      // Re-apply endpoint URL if serverUrl changed
+      if (e.affectsConfiguration('buildershq.serverUrl')) {
+        const newCfg = vscode.workspace.getConfiguration('buildershq');
+        const newRuntime = loadRuntimeConfig();
+        heartbeatService!.setEndpointUrl(
+          newRuntime.presenceServerUrl ||
+          newCfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence')
+        );
+      }
+
       // Existing heartbeat reconfiguration
       if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
         const state = presenceTracker!.getState();

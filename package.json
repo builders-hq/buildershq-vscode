@@ -114,7 +114,7 @@
         "buildershq.sharedEnvFilePath": {
           "type": "string",
           "default": "",
-          "description": "Optional path to a .env file supplying GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and MONGODB_URI for device-flow login and MongoDB persistence. Leave empty to skip (GitHub login via VS Code's built-in account still works)."
+          "description": "Optional path to a .env file supplying PRESENCE_SERVER_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and MONGODB_URI. PRESENCE_SERVER_URL overrides the serverUrl setting. Leave empty to skip."
         }
       }
     }
