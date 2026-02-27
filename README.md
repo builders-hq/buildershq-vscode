@@ -1,10 +1,9 @@
 # BuildersHQ
 
-Track your developer presence in VS Code. BuildersHQ detects activity — edits, saves, debug sessions, Claude Code usage, git commits — and reports your status (`active`, `idle`, or `away`) to a local BuildersHQ server. All data stays on your machine or your team's own infrastructure.
+Track your developer presence in VS Code. BuildersHQ detects activity — edits, saves, debug sessions, Claude Code usage, git commits — and reports your status (`active`, `idle`, or `away`) to a BuildersHQ server.
 
 ## Requirements
 
-- A running BuildersHQ server (defaults to `http://127.0.0.1:3000/api/presence`).
 - VS Code 1.85 or later.
 
 ## Features
@@ -21,9 +20,8 @@ Track your developer presence in VS Code. BuildersHQ detects activity — edits,
 ## Setup
 
 1. Install the extension.
-2. Ensure your BuildersHQ server is running.
-3. If your server is not on the default port, set `buildershq.serverUrl` in VS Code Settings.
-4. Optionally log in with GitHub via the Command Palette (`BuildersHQ: Login with GitHub`) to enable user-attributed heartbeats.
+2. Optionally log in with GitHub via the Command Palette (`BuildersHQ: Login with GitHub`) to enable user-attributed heartbeats.
+3. To use a self-hosted server instead of the default, set `buildershq.serverUrl` in VS Code Settings.
 
 ## Status Bar
 
@@ -52,7 +50,7 @@ When Claude Code or Codex activity is detected, a sparkle icon appears in the st
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `buildershq.serverUrl` | `http://127.0.0.1:3000/api/presence` | URL of the BuildersHQ presence API endpoint. |
+| `buildershq.serverUrl` | `https://buildershq.net/api/presence` | URL of the BuildersHQ presence API endpoint. |
 | `buildershq.idleAfterSeconds` | `300` | Seconds of inactivity before status becomes idle. |
 | `buildershq.awayAfterSeconds` | `900` | Seconds of inactivity before status becomes away. |
 | `buildershq.heartbeatActiveSeconds` | `30` | Heartbeat interval while active (seconds). |
@@ -66,7 +64,7 @@ When Claude Code or Codex activity is detected, a sparkle icon appears in the st
 
 ## Privacy
 
-BuildersHQ sends heartbeat data **only to the URL configured in `buildershq.serverUrl`**, which defaults to `http://127.0.0.1:3000` (localhost). No data is sent to Anthropic, Microsoft, or any third-party service.
+BuildersHQ sends heartbeat data **only to the URL configured in `buildershq.serverUrl`**, which defaults to `https://buildershq.net/api/presence`. To keep all data on your own infrastructure, point `buildershq.serverUrl` at a self-hosted BuildersHQ server. No data is sent to Anthropic or Microsoft.
 
 Heartbeat payloads include:
 

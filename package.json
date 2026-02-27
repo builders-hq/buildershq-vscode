@@ -1,9 +1,9 @@
 {
   "name": "buildershq",
   "displayName": "BuildersHQ",
-  "description": "Track your developer presence across workspaces. Sends heartbeat signals to a self-hosted BuildersHQ server to show your active, idle, or away status in real time.",
-  "version": "1.0.0",
-  "publisher": "appmakers",
+  "description": "Track your developer presence across workspaces. Reports your active, idle, or away status — including Claude Code and git activity — to buildershq.net or a self-hosted server.",
+  "version": "1.0.3",
+  "publisher": "buildershq",
   "license": "MIT",
   "icon": "icon.png",
   "keywords": [

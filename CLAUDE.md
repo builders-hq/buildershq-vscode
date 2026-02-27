@@ -15,7 +15,7 @@ A VS Code extension that tracks developer presence and sends heartbeats to a Bui
 
 ### Heartbeat
 
-- Endpoint: `http://127.0.0.1:3000/api/presence`
+- Endpoint: `https://buildershq.net/api/presence` (default, configurable via `buildershq.serverUrl`)
 - Interval:
   - Active: every 30 seconds.
   - Idle/Away: every 60 seconds.
@@ -77,4 +77,4 @@ src/
 
 - `computerName` is the stable cross-session identity for desk aggregation.
 - `sessionId` is ephemeral. Do not use it as a stable person identifier.
-- The extension only posts to localhost (`127.0.0.1:3000`).
+- The default endpoint is `https://buildershq.net/api/presence`. Users can override with `buildershq.serverUrl` to point at a self-hosted server.
