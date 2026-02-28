@@ -44,7 +44,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const endpointUrl = runtimeCfg.presenceServerUrl ||
     cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
   console.log(`[BuildersHQ] Resolved endpointUrl=${endpointUrl}`);
-  serverBaseUrl = endpointUrl.replace(/\/api\/presence\/?$/, '');
+  // Auth always uses the VS Code setting (not .env override) so it hits production
+  const authEndpointUrl = cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
+  serverBaseUrl = authEndpointUrl.replace(/\/api\/presence\/?$/, '');
 
   // Register URI handler for browser-based login callback
   const uriHandlerDisposable = githubAuthService.registerUriHandler(serverBaseUrl);
@@ -239,7 +241,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newRuntime = loadRuntimeConfig();
         heartbeatService!.setEndpointUrl(
           newRuntime.presenceServerUrl ||
-          newCfg.get<string>('serverUrl', 'http://127.0.0.1:3000/api/presence')
+          newCfg.get<string>('serverUrl', 'https://buildershq.net/api/presence')
         );
       }
 
