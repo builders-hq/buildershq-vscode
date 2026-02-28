@@ -26,6 +26,7 @@ let gitWatcher: GitCommitWatcher | undefined;
 let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
 let roomWatcher: RoomWatcher | undefined;
+let trackingStarted = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const sessionId = randomUUID();
@@ -40,9 +41,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const runtimeCfg = loadRuntimeConfig();
   const endpointUrl = runtimeCfg.presenceServerUrl ||
     cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
+  const serverBaseUrl = endpointUrl.replace(/\/api\/presence\/?$/, '');
+
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
     getUser: () => getHeartbeatUser(),
+    getAccessToken: () => githubAuthService?.getBuildersHQAccessToken(),
     persistPayload: async (payload) => {
       await mongoStore?.saveHeartbeat(payload);
     },
@@ -60,13 +64,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }
 
-  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
-
   // Wire presence state changes → status bar + heartbeat
   presenceTracker.onStateChange(
     (newStatus: PresenceStatus, oldStatus: PresenceStatus, reason: ActivityReason) => {
       updateStatusBar(context);
-      if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+      if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false) && trackingStarted) {
         heartbeatService!.onPresenceStateChange(newStatus, oldStatus, reason);
       }
     }
@@ -74,7 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Wire force heartbeat (for debug/task events that need immediate send)
   presenceTracker.onForceHeartbeat((reason: ActivityReason) => {
-    if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+    if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false) && trackingStarted) {
       heartbeatService!.forceHeartbeat(reason);
     }
   });
@@ -82,6 +84,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Wire connection changes → status bar
   heartbeatService.onConnectionChange(() => {
     updateStatusBar(context);
+  });
+
+  // Wire auth failure → try refresh, re-exchange, or prompt login
+  heartbeatService.onAuthFailure(async () => {
+    console.log('[BuildersHQ] Handling auth failure — attempting token refresh');
+    const refreshed = await githubAuthService!.refreshBuildersHQToken(serverBaseUrl);
+    if (refreshed) {
+      console.log('[BuildersHQ] Token refreshed successfully');
+      return;
+    }
+
+    console.log('[BuildersHQ] Refresh failed — attempting re-exchange');
+    const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
+    if (exchanged) {
+      console.log('[BuildersHQ] Token re-exchanged successfully');
+      return;
+    }
+
+    console.log('[BuildersHQ] All token recovery failed — stopping tracking');
+    stopTracking();
+    promptLogin(context);
   });
 
   // Pause / Resume commands
@@ -97,18 +120,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const resumeCmd = vscode.commands.registerCommand('buildershq.resume', async () => {
     await context.globalState.update(PAUSE_STATE_KEY, false);
-    const state = presenceTracker!.getState();
-    heartbeatService!.start(state.status, state.reason);
-    if (claudeWatcher) {
-      claudeWatcher.start();
+    if (trackingStarted) {
+      const state = presenceTracker!.getState();
+      heartbeatService!.start(state.status, state.reason);
+      if (claudeWatcher) {
+        claudeWatcher.start();
+      }
+      if (codexWatcher) {
+        codexWatcher.start();
+      }
+      if (gitWatcher) {
+        gitWatcher.start();
+      }
+      roomWatcher?.start();
     }
-    if (codexWatcher) {
-      codexWatcher.start();
-    }
-    if (gitWatcher) {
-      gitWatcher.start();
-    }
-    roomWatcher?.start();
     updateStatusBar(context);
   });
 
@@ -116,7 +141,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
       const user = await githubAuthService!.login();
       if (user) {
-        vscode.window.showInformationMessage(`BuildersHQ logged in as ${user.githubLogin}`);
+        vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
+        // Exchange GitHub token for BuildersHQ API token
+        const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
+        if (exchanged) {
+          startTracking(context);
+        } else {
+          vscode.window.showWarningMessage(
+            'BuildersHQ: Logged in to GitHub but could not connect to the BuildersHQ server. Tracking will start when the server is reachable.',
+          );
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -126,9 +160,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const logoutCmd = vscode.commands.registerCommand('buildershq.logoutFromGitHub', async () => {
+    stopTracking();
     await githubAuthService!.logout();
-    vscode.window.showInformationMessage('BuildersHQ logged out from GitHub');
-    updateStatusBar(context);
+    vscode.window.showInformationMessage('BuildersHQ: Logged out from GitHub');
+    promptLogin(context);
+  });
+
+  const dashboardCmd = vscode.commands.registerCommand('buildershq.openDashboard', () => {
+    vscode.env.openExternal(vscode.Uri.parse(serverBaseUrl || 'https://buildershq.net'));
   });
 
   // Debug session activity detection
@@ -182,7 +221,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
 
       // Existing heartbeat reconfiguration
-      if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+      if (!context.globalState.get<boolean>(PAUSE_STATE_KEY, false) && trackingStarted) {
         const state = presenceTracker!.getState();
         heartbeatService!.onPresenceStateChange(state.status, state.status, state.reason);
       }
@@ -204,22 +243,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  // Start tracking
+  // Start presence tracker always (needed for status tracking)
   presenceTracker.start();
 
-  if (!isPaused) {
-    heartbeatService.start('active', 'activate');
-    roomWatcher?.start();
+  // Attempt to start tracking if authenticated
+  if (githubAuthService.isAuthenticated()) {
+    if (githubAuthService.getBuildersHQAccessToken()) {
+      // Fully authenticated — start immediately
+      startTracking(context);
+    } else {
+      // Has GitHub but no BuildersHQ token — exchange
+      const exchanged = await githubAuthService.exchangeForBuildersHQToken(serverBaseUrl);
+      if (exchanged) {
+        startTracking(context);
+      } else {
+        // Server unreachable or token invalid — show as not connected
+        // Will retry on next login or when server becomes available
+        console.log('[BuildersHQ] Token exchange failed on activation — prompting login');
+        promptLogin(context);
+      }
+    }
+  } else {
+    // Not authenticated at all — prompt login
+    promptLogin(context);
   }
-
-  // Claude Code activity tracking (opt-in)
-  initClaudeCodeTracking(context, isPaused);
-
-  // OpenAI Codex activity tracking (opt-in)
-  initCodexTracking(context, isPaused);
-
-  // Git commit activity tracking
-  initGitCommitTracking(context, isPaused);
 
   updateStatusBar(context);
 
@@ -231,6 +278,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     resumeCmd,
     loginCmd,
     logoutCmd,
+    dashboardCmd,
     debugStartSub,
     debugStopSub,
     taskStartSub,
@@ -239,6 +287,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     configChangeSub,
     githubAuthService
   );
+}
+
+function startTracking(context: vscode.ExtensionContext): void {
+  if (trackingStarted) {
+    return;
+  }
+  trackingStarted = true;
+
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (!isPaused) {
+    heartbeatService!.start('active', 'activate');
+    roomWatcher?.start();
+  }
+
+  // Claude Code activity tracking
+  initClaudeCodeTracking(context, isPaused);
+
+  // OpenAI Codex activity tracking
+  initCodexTracking(context, isPaused);
+
+  // Git commit activity tracking
+  initGitCommitTracking(context, isPaused);
+
+  updateStatusBar(context);
+}
+
+function stopTracking(): void {
+  if (!trackingStarted) {
+    return;
+  }
+  trackingStarted = false;
+
+  heartbeatService?.stop();
+  claudeWatcher?.stop();
+  codexWatcher?.stop();
+  gitWatcher?.stop();
+  roomWatcher?.stop();
+}
+
+function promptLogin(context: vscode.ExtensionContext): void {
+  updateStatusBar(context);
+  vscode.window.showInformationMessage(
+    'BuildersHQ requires GitHub login to track your presence.',
+    'Login with GitHub',
+  ).then((choice) => {
+    if (choice === 'Login with GitHub') {
+      vscode.commands.executeCommand('buildershq.loginWithGitHub');
+    }
+  });
 }
 
 function initClaudeCodeTracking(
@@ -449,9 +547,10 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   const paused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
   const status = presenceTracker.getStatus();
   const connected = heartbeatService.isConnected();
+  const authenticated = githubAuthService?.isFullyAuthenticated() ?? false;
   const claudeActive = claudeWatcher?.isWatching() ?? false;
   const codexActive = codexWatcher?.isWatching() ?? false;
-  statusBarManager.update(status, paused, connected, claudeActive, codexActive);
+  statusBarManager.update(status, paused, connected, authenticated, claudeActive, codexActive);
 }
 
 export async function deactivate(): Promise<void> {
@@ -474,4 +573,5 @@ export async function deactivate(): Promise<void> {
   githubAuthService = undefined;
   mongoStore = undefined;
   roomWatcher = undefined;
+  trackingStarted = false;
 }

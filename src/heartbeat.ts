@@ -99,6 +99,7 @@ export interface HeartbeatPayload {
 interface HeartbeatServiceOptions {
   endpointUrl?: string;
   getUser?: () => HeartbeatUser | undefined;
+  getAccessToken?: () => string | undefined;
   persistPayload?: (payload: HeartbeatPayload) => Promise<void>;
 }
 
@@ -109,6 +110,7 @@ export class HeartbeatService {
   private currentReason: ActivityReason = 'none';
   private connected: boolean = false;
   private onConnectionChangeCallback: ((connected: boolean) => void) | undefined;
+  private onAuthFailureCallback: (() => void) | undefined;
 
   // Session tracking
   private sessionId: string;
@@ -137,6 +139,7 @@ export class HeartbeatService {
   private currentBackoffIndex: number = 0;
   private endpointUrl: string;
   private readonly getUser: (() => HeartbeatUser | undefined) | undefined;
+  private readonly getAccessToken: (() => string | undefined) | undefined;
   private readonly persistPayload: ((payload: HeartbeatPayload) => Promise<void>) | undefined;
 
   constructor(
@@ -148,6 +151,7 @@ export class HeartbeatService {
     this.getFocused = getFocused;
     this.endpointUrl = options.endpointUrl ?? ENDPOINT_URL;
     this.getUser = options.getUser;
+    this.getAccessToken = options.getAccessToken;
     this.persistPayload = options.persistPayload;
   }
 
@@ -158,6 +162,10 @@ export class HeartbeatService {
 
   onConnectionChange(callback: (connected: boolean) => void): void {
     this.onConnectionChangeCallback = callback;
+  }
+
+  onAuthFailure(callback: () => void): void {
+    this.onAuthFailureCallback = callback;
   }
 
   onPresenceStateChange(
@@ -269,9 +277,14 @@ export class HeartbeatService {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2_000);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = this.getAccessToken?.();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       await fetch(this.endpointUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
@@ -386,19 +399,32 @@ export class HeartbeatService {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5_000);
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = this.getAccessToken?.();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch(this.endpointUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
 
-      const success = res.status < 500;
       console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
-
       this.heartbeatInFlight = false;
+
+      // Auth failure — don't treat as connection error, emit separate callback
+      if (res.status === 401) {
+        console.log('[BuildersHQ] Authentication failed (401)');
+        this.onAuthFailureCallback?.();
+        return;
+      }
+
+      const success = res.status < 500;
       const wasConnected = this.connected;
       this.connected = success;
 

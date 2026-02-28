@@ -3,6 +3,8 @@ import { MongoStore } from './mongoStore';
 import { RuntimeConfig } from './env';
 
 const ACCESS_TOKEN_SECRET_KEY = 'buildershq.github.accessToken';
+const BUILDERSHQ_ACCESS_TOKEN_KEY = 'buildershq.api.accessToken';
+const BUILDERSHQ_REFRESH_TOKEN_KEY = 'buildershq.api.refreshToken';
 const LOGIN_SCOPES = 'read:user user:email';
 const VSCODE_GITHUB_PROVIDER = 'github';
 const VSCODE_GITHUB_SCOPES = ['read:user', 'user:email'];
@@ -51,8 +53,24 @@ export interface GitHubAuthState {
   scopes: string[];
 }
 
+type TokenExchangeResponse = {
+  ok: boolean;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  user?: {
+    githubUserId: number;
+    githubLogin: string;
+    name: string | null;
+    email: string | null;
+    avatarUrl: string | null;
+  };
+  error?: string;
+};
+
 export class GitHubAuthService implements vscode.Disposable {
   private authState: GitHubAuthState | undefined;
+  private buildershqAccessToken: string | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -69,12 +87,22 @@ export class GitHubAuthService implements vscode.Disposable {
     return Boolean(this.authState);
   }
 
+  getBuildersHQAccessToken(): string | undefined {
+    return this.buildershqAccessToken;
+  }
+
+  isFullyAuthenticated(): boolean {
+    return Boolean(this.authState) && Boolean(this.buildershqAccessToken);
+  }
+
   async restoreSession(): Promise<void> {
     // Prefer the account already connected in VS Code.
     const vscodeSession = await this.getVsCodeSession({ createIfNone: false, silent: true });
     if (vscodeSession) {
       try {
         await this.setAuthState(vscodeSession.accessToken, vscodeSession.scopes);
+        // Restore BuildersHQ token from SecretStorage
+        this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
         return;
       } catch {
         this.authState = undefined;
@@ -89,9 +117,82 @@ export class GitHubAuthService implements vscode.Disposable {
 
     try {
       await this.setAuthState(token, []);
+      // Restore BuildersHQ token from SecretStorage
+      this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
     } catch {
       await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
       this.authState = undefined;
+    }
+  }
+
+  async exchangeForBuildersHQToken(serverBaseUrl: string): Promise<boolean> {
+    if (!this.authState) {
+      return false;
+    }
+
+    try {
+      const res = await fetch(`${serverBaseUrl}/api/auth/token/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ githubAccessToken: this.authState.accessToken }),
+      });
+
+      if (!res.ok) {
+        console.log(`[BuildersHQ] Token exchange failed: ${res.status}`);
+        return false;
+      }
+
+      const json = (await res.json()) as TokenExchangeResponse;
+      if (!json.ok || !json.accessToken || !json.refreshToken) {
+        return false;
+      }
+
+      this.buildershqAccessToken = json.accessToken;
+      await this.context.secrets.store(BUILDERSHQ_ACCESS_TOKEN_KEY, json.accessToken);
+      await this.context.secrets.store(BUILDERSHQ_REFRESH_TOKEN_KEY, json.refreshToken);
+
+      console.log('[BuildersHQ] Token exchange successful');
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.log(`[BuildersHQ] Token exchange error: ${msg}`);
+      return false;
+    }
+  }
+
+  async refreshBuildersHQToken(serverBaseUrl: string): Promise<boolean> {
+    const refreshToken = await this.context.secrets.get(BUILDERSHQ_REFRESH_TOKEN_KEY);
+    if (!refreshToken) {
+      return false;
+    }
+
+    try {
+      const res = await fetch(`${serverBaseUrl}/api/auth/token/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      if (!res.ok) {
+        console.log(`[BuildersHQ] Token refresh failed: ${res.status}`);
+        return false;
+      }
+
+      const json = (await res.json()) as TokenExchangeResponse;
+      if (!json.ok || !json.accessToken || !json.refreshToken) {
+        return false;
+      }
+
+      this.buildershqAccessToken = json.accessToken;
+      await this.context.secrets.store(BUILDERSHQ_ACCESS_TOKEN_KEY, json.accessToken);
+      await this.context.secrets.store(BUILDERSHQ_REFRESH_TOKEN_KEY, json.refreshToken);
+
+      console.log('[BuildersHQ] Token refresh successful');
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.log(`[BuildersHQ] Token refresh error: ${msg}`);
+      return false;
     }
   }
 
@@ -150,8 +251,11 @@ export class GitHubAuthService implements vscode.Disposable {
 
   async logout(): Promise<void> {
     await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
+    await this.context.secrets.delete(BUILDERSHQ_ACCESS_TOKEN_KEY);
+    await this.context.secrets.delete(BUILDERSHQ_REFRESH_TOKEN_KEY);
     await this.clearVsCodeSessionPreference();
     this.authState = undefined;
+    this.buildershqAccessToken = undefined;
   }
 
   dispose(): void {

@@ -1,22 +1,24 @@
 import * as vscode from 'vscode';
 import { PresenceStatus } from './presence';
 
-type DisplayKey = PresenceStatus | 'paused' | 'disconnected';
+type DisplayKey = PresenceStatus | 'paused' | 'disconnected' | 'not_logged_in';
 
 const STATUS_LABELS: Record<DisplayKey, string> = {
-  active:       '$(pulse) BuildersHQ: Active',
-  idle:         '$(clock) BuildersHQ: Idle',
-  away:         '$(eye-closed) BuildersHQ: Away',
-  paused:       '$(debug-pause) BuildersHQ: Paused',
-  disconnected: '$(alert) BuildersHQ: Not Connected',
+  active:        '$(pulse) BuildersHQ: Active',
+  idle:          '$(clock) BuildersHQ: Idle',
+  away:          '$(eye-closed) BuildersHQ: Away',
+  paused:        '$(debug-pause) BuildersHQ: Paused',
+  disconnected:  '$(alert) BuildersHQ: Not Connected',
+  not_logged_in: '$(account) BuildersHQ: Login Required',
 };
 
 const STATUS_TOOLTIPS: Record<DisplayKey, string> = {
-  active:       'BuildersHQ is tracking your presence (Active)',
-  idle:         'BuildersHQ detected idle state',
-  away:         'BuildersHQ detected away state',
-  paused:       'BuildersHQ presence tracking is paused',
-  disconnected: 'BuildersHQ cannot reach the presence server',
+  active:        'BuildersHQ is tracking your presence (Active)',
+  idle:          'BuildersHQ detected idle state',
+  away:          'BuildersHQ detected away state',
+  paused:        'BuildersHQ presence tracking is paused',
+  disconnected:  'BuildersHQ cannot reach the presence server',
+  not_logged_in: 'Click to log in with GitHub',
 };
 
 export class StatusBarManager implements vscode.Disposable {
@@ -36,12 +38,16 @@ export class StatusBarManager implements vscode.Disposable {
     status: PresenceStatus,
     paused: boolean,
     connected: boolean,
+    authenticated: boolean,
     claudeActive?: boolean,
     codexActive?: boolean,
   ): void {
     let displayKey: DisplayKey;
 
-    if (paused) {
+    if (!authenticated) {
+      displayKey = 'not_logged_in';
+      this.statusBarItem.command = 'buildershq.loginWithGitHub';
+    } else if (paused) {
       displayKey = 'paused';
       this.statusBarItem.command = 'buildershq.resume';
     } else if (!connected) {
