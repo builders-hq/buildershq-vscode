@@ -27,6 +27,7 @@ let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
 let roomWatcher: RoomWatcher | undefined;
 let trackingStarted = false;
+let serverBaseUrl = '';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const sessionId = randomUUID();
@@ -39,9 +40,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   presenceTracker = new PresenceTracker();
   const cfg = vscode.workspace.getConfiguration('buildershq');
   const runtimeCfg = loadRuntimeConfig();
+  console.log(`[BuildersHQ] Runtime config: envPath=${runtimeCfg.envPath}, presenceServerUrl=${runtimeCfg.presenceServerUrl || '(empty)'}`);
   const endpointUrl = runtimeCfg.presenceServerUrl ||
     cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
-  const serverBaseUrl = endpointUrl.replace(/\/api\/presence\/?$/, '');
+  console.log(`[BuildersHQ] Resolved endpointUrl=${endpointUrl}`);
+  serverBaseUrl = endpointUrl.replace(/\/api\/presence\/?$/, '');
+
+  // Register URI handler for browser-based login callback
+  const uriHandlerDisposable = githubAuthService.registerUriHandler(serverBaseUrl);
 
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
@@ -138,32 +144,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const loginCmd = vscode.commands.registerCommand('buildershq.loginWithGitHub', async () => {
+    console.log('[BuildersHQ] Login command invoked — trying browser flow');
     try {
-      const user = await githubAuthService!.login();
+      // Primary: browser-based login
+      const user = await githubAuthService!.loginViaBrowser(serverBaseUrl);
       if (user) {
+        console.log(`[BuildersHQ] Browser login succeeded: ${user.githubLogin}`);
         vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
-        // Exchange GitHub token for BuildersHQ API token
+        startTracking(context);
+        updateStatusBar(context);
+        return;
+      }
+
+      // Fallback: VS Code built-in GitHub auth + device flow
+      console.log('[BuildersHQ] Browser login timed out — falling back to VS Code auth');
+      const fallbackUser = await githubAuthService!.login();
+      if (fallbackUser) {
+        console.log(`[BuildersHQ] Fallback login succeeded: ${fallbackUser.githubLogin}`);
+        vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${fallbackUser.githubLogin}`);
         const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
         if (exchanged) {
           startTracking(context);
         } else {
           vscode.window.showWarningMessage(
-            'BuildersHQ: Logged in to GitHub but could not connect to the BuildersHQ server. Tracking will start when the server is reachable.',
+            'BuildersHQ: Logged in to GitHub but could not connect to the BuildersHQ server.',
           );
         }
+      } else {
+        console.log('[BuildersHQ] Fallback login also returned no user');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.log(`[BuildersHQ] Login command error: ${message}`);
       vscode.window.showErrorMessage(`BuildersHQ GitHub login failed: ${message}`);
     }
     updateStatusBar(context);
   });
 
   const logoutCmd = vscode.commands.registerCommand('buildershq.logoutFromGitHub', async () => {
+    console.log('[BuildersHQ] Logout command invoked');
     stopTracking();
     await githubAuthService!.logout();
-    vscode.window.showInformationMessage('BuildersHQ: Logged out from GitHub');
-    promptLogin(context);
+    vscode.window.showInformationMessage('BuildersHQ: Logged out. Use "BuildersHQ: Login" to sign in again.');
+    updateStatusBar(context);
   });
 
   const dashboardCmd = vscode.commands.registerCommand('buildershq.openDashboard', () => {
@@ -247,14 +270,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   presenceTracker.start();
 
   // Attempt to start tracking if authenticated
+  console.log(`[BuildersHQ] Activation auth check: isAuthenticated=${githubAuthService.isAuthenticated()}, hasApiToken=${Boolean(githubAuthService.getBuildersHQAccessToken())}, user=${githubAuthService.getUserProfile()?.githubLogin ?? 'none'}`);
   if (githubAuthService.isAuthenticated()) {
     if (githubAuthService.getBuildersHQAccessToken()) {
       // Fully authenticated — start immediately
+      console.log('[BuildersHQ] Fully authenticated — starting tracking immediately');
       startTracking(context);
     } else {
       // Has GitHub but no BuildersHQ token — exchange
+      console.log('[BuildersHQ] Has GitHub auth but no API token — exchanging');
       const exchanged = await githubAuthService.exchangeForBuildersHQToken(serverBaseUrl);
       if (exchanged) {
+        console.log('[BuildersHQ] Token exchange succeeded — starting tracking');
         startTracking(context);
       } else {
         // Server unreachable or token invalid — show as not connected
@@ -265,6 +292,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   } else {
     // Not authenticated at all — prompt login
+    console.log('[BuildersHQ] Not authenticated — prompting login');
     promptLogin(context);
   }
 
@@ -274,6 +302,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     presenceTracker,
     statusBarManager,
+    uriHandlerDisposable,
     pauseCmd,
     resumeCmd,
     loginCmd,
@@ -291,8 +320,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 function startTracking(context: vscode.ExtensionContext): void {
   if (trackingStarted) {
+    console.log('[BuildersHQ] startTracking() — already started, skipping');
     return;
   }
+  console.log('[BuildersHQ] startTracking() — initializing heartbeats and watchers');
   trackingStarted = true;
 
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
@@ -316,8 +347,10 @@ function startTracking(context: vscode.ExtensionContext): void {
 
 function stopTracking(): void {
   if (!trackingStarted) {
+    console.log('[BuildersHQ] stopTracking() — not started, skipping');
     return;
   }
+  console.log('[BuildersHQ] stopTracking() — stopping heartbeats and watchers');
   trackingStarted = false;
 
   heartbeatService?.stop();
@@ -327,8 +360,22 @@ function stopTracking(): void {
   roomWatcher?.stop();
 }
 
-function promptLogin(context: vscode.ExtensionContext): void {
+async function promptLogin(context: vscode.ExtensionContext): Promise<void> {
+  console.log('[BuildersHQ] promptLogin() — opening browser for login');
   updateStatusBar(context);
+
+  // Auto-open the browser for a full-page login experience
+  const user = await githubAuthService!.loginViaBrowser(serverBaseUrl);
+  if (user) {
+    console.log(`[BuildersHQ] Browser login succeeded: ${user.githubLogin}`);
+    vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
+    startTracking(context);
+    updateStatusBar(context);
+    return;
+  }
+
+  // Fallback: show notification for manual login
+  console.log('[BuildersHQ] Browser login timed out — showing notification fallback');
   vscode.window.showInformationMessage(
     'BuildersHQ requires GitHub login to track your presence.',
     'Login with GitHub',

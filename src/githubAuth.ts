@@ -72,6 +72,10 @@ export class GitHubAuthService implements vscode.Disposable {
   private authState: GitHubAuthState | undefined;
   private buildershqAccessToken: string | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private pendingBrowserLogin: {
+    resolve: (profile: GitHubUserProfile | undefined) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -96,40 +100,76 @@ export class GitHubAuthService implements vscode.Disposable {
   }
 
   async restoreSession(): Promise<void> {
+    console.log('[BuildersHQ Auth] restoreSession() — checking for existing GitHub session');
     // Prefer the account already connected in VS Code.
     const vscodeSession = await this.getVsCodeSession({ createIfNone: false, silent: true });
     if (vscodeSession) {
+      console.log('[BuildersHQ Auth] Found VS Code GitHub session, setting auth state');
       try {
         await this.setAuthState(vscodeSession.accessToken, vscodeSession.scopes);
         // Restore BuildersHQ token from SecretStorage
         this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
+        console.log(`[BuildersHQ Auth] Session restored: user=${this.authState?.user.githubLogin}, hasApiToken=${Boolean(this.buildershqAccessToken)}`);
         return;
-      } catch {
+      } catch (err) {
+        console.log(`[BuildersHQ Auth] Failed to set auth state from VS Code session: ${err instanceof Error ? err.message : String(err)}`);
         this.authState = undefined;
       }
+    } else {
+      console.log('[BuildersHQ Auth] No VS Code GitHub session found');
     }
 
     // Fallback to extension-stored token (device flow path).
     const token = await this.context.secrets.get(ACCESS_TOKEN_SECRET_KEY);
-    if (!token) {
+    if (token) {
+      console.log('[BuildersHQ Auth] Found stored device-flow token, setting auth state');
+      try {
+        await this.setAuthState(token, []);
+        // Restore BuildersHQ token from SecretStorage
+        this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
+        console.log(`[BuildersHQ Auth] Device-flow session restored: user=${this.authState?.user.githubLogin}, hasApiToken=${Boolean(this.buildershqAccessToken)}`);
+        return;
+      } catch (err) {
+        console.log(`[BuildersHQ Auth] Device-flow token invalid: ${err instanceof Error ? err.message : String(err)}`);
+        await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
+        this.authState = undefined;
+      }
+    }
+
+    // Fallback: restore from BuildersHQ tokens only (browser-flow path).
+    // The browser flow doesn't give us a GitHub access token, so we only have
+    // the BuildersHQ JWT. We can't call setAuthState (no GitHub token) but we
+    // can still be "authenticated" if we have a valid API token.
+    this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
+    if (this.buildershqAccessToken) {
+      console.log('[BuildersHQ Auth] Found stored BuildersHQ API token (browser-flow user) — restoring minimal auth state');
+      // We don't have a user profile cached locally — set a minimal placeholder.
+      // The server has the real profile; for display we use what the JWT gave us.
+      // On next token refresh we could update this, but for now it's sufficient.
+      this.authState = {
+        user: {
+          githubUserId: 0,
+          githubLogin: 'authenticated',
+          name: null,
+          email: null,
+          avatarUrl: null,
+        },
+        accessToken: '',
+        scopes: [],
+      };
       return;
     }
 
-    try {
-      await this.setAuthState(token, []);
-      // Restore BuildersHQ token from SecretStorage
-      this.buildershqAccessToken = await this.context.secrets.get(BUILDERSHQ_ACCESS_TOKEN_KEY);
-    } catch {
-      await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
-      this.authState = undefined;
-    }
+    console.log('[BuildersHQ Auth] No stored tokens — user is not authenticated');
   }
 
   async exchangeForBuildersHQToken(serverBaseUrl: string): Promise<boolean> {
     if (!this.authState) {
+      console.log('[BuildersHQ Auth] exchangeForBuildersHQToken() — no auth state, skipping');
       return false;
     }
 
+    console.log(`[BuildersHQ Auth] exchangeForBuildersHQToken() — POSTing to ${serverBaseUrl}/api/auth/token/exchange`);
     try {
       const res = await fetch(`${serverBaseUrl}/api/auth/token/exchange`, {
         method: 'POST',
@@ -138,7 +178,8 @@ export class GitHubAuthService implements vscode.Disposable {
       });
 
       if (!res.ok) {
-        console.log(`[BuildersHQ] Token exchange failed: ${res.status}`);
+        const body = await res.text().catch(() => '');
+        console.log(`[BuildersHQ Auth] Token exchange failed: HTTP ${res.status} — ${body}`);
         return false;
       }
 
@@ -163,8 +204,10 @@ export class GitHubAuthService implements vscode.Disposable {
   async refreshBuildersHQToken(serverBaseUrl: string): Promise<boolean> {
     const refreshToken = await this.context.secrets.get(BUILDERSHQ_REFRESH_TOKEN_KEY);
     if (!refreshToken) {
+      console.log('[BuildersHQ Auth] refreshBuildersHQToken() — no refresh token stored, skipping');
       return false;
     }
+    console.log(`[BuildersHQ Auth] refreshBuildersHQToken() — POSTing to ${serverBaseUrl}/api/auth/token/refresh`);
 
     try {
       const res = await fetch(`${serverBaseUrl}/api/auth/token/refresh`, {
@@ -197,13 +240,17 @@ export class GitHubAuthService implements vscode.Disposable {
   }
 
   async login(): Promise<GitHubUserProfile | undefined> {
+    console.log('[BuildersHQ Auth] login() — starting GitHub login flow');
     // First choice: use VS Code's built-in GitHub auth account/session.
     const vscodeSession = await this.getVsCodeSession({ createIfNone: true });
     if (vscodeSession) {
+      console.log('[BuildersHQ Auth] Got VS Code GitHub session via createIfNone');
       await this.setAuthState(vscodeSession.accessToken, vscodeSession.scopes);
       await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
+      console.log(`[BuildersHQ Auth] login() complete: user=${this.authState?.user.githubLogin}`);
       return this.authState?.user;
     }
+    console.log('[BuildersHQ Auth] VS Code GitHub session unavailable, falling back to device flow');
 
     // Fallback: explicit device flow using shared .env values.
     const config = this.getConfig();
@@ -250,15 +297,121 @@ export class GitHubAuthService implements vscode.Disposable {
   }
 
   async logout(): Promise<void> {
+    console.log('[BuildersHQ Auth] logout() — clearing all stored tokens and auth state');
     await this.context.secrets.delete(ACCESS_TOKEN_SECRET_KEY);
     await this.context.secrets.delete(BUILDERSHQ_ACCESS_TOKEN_KEY);
     await this.context.secrets.delete(BUILDERSHQ_REFRESH_TOKEN_KEY);
     await this.clearVsCodeSessionPreference();
     this.authState = undefined;
     this.buildershqAccessToken = undefined;
+    console.log('[BuildersHQ Auth] logout() complete');
+  }
+
+  registerUriHandler(serverBaseUrl: string): vscode.Disposable {
+    return vscode.window.registerUriHandler({
+      handleUri: async (uri: vscode.Uri) => {
+        console.log(`[BuildersHQ Auth] URI handler invoked: ${uri.path}`);
+        if (uri.path === '/auth-callback') {
+          await this.handleAuthCallback(uri, serverBaseUrl);
+        }
+      },
+    });
+  }
+
+  async loginViaBrowser(serverBaseUrl: string): Promise<GitHubUserProfile | undefined> {
+    const scheme = vscode.env.uriScheme;
+    const loginUrl = `${serverBaseUrl}/api/auth/github/start-vscode?scheme=${encodeURIComponent(scheme)}`;
+
+    console.log(`[BuildersHQ Auth] loginViaBrowser() — opening ${loginUrl}`);
+    await vscode.env.openExternal(vscode.Uri.parse(loginUrl));
+
+    return new Promise<GitHubUserProfile | undefined>((resolve) => {
+      // Cancel any previous pending login
+      if (this.pendingBrowserLogin) {
+        clearTimeout(this.pendingBrowserLogin.timeoutId);
+        this.pendingBrowserLogin.resolve(undefined);
+      }
+
+      const timeoutId = setTimeout(() => {
+        console.log('[BuildersHQ Auth] Browser login timed out (5 min)');
+        this.pendingBrowserLogin = undefined;
+        resolve(undefined);
+      }, 5 * 60 * 1000);
+
+      this.pendingBrowserLogin = { resolve, timeoutId };
+    });
+  }
+
+  private async handleAuthCallback(uri: vscode.Uri, serverBaseUrl: string): Promise<void> {
+    const params = new URLSearchParams(uri.query);
+    const code = params.get('code');
+
+    if (!code) {
+      console.log('[BuildersHQ Auth] auth-callback missing code parameter');
+      vscode.window.showErrorMessage('BuildersHQ: Login callback missing authorization code.');
+      this.pendingBrowserLogin?.resolve(undefined);
+      this.pendingBrowserLogin = undefined;
+      return;
+    }
+
+    console.log(`[BuildersHQ Auth] Redeeming auth code via ${serverBaseUrl}/api/auth/vscode/redeem`);
+    try {
+      const res = await fetch(`${serverBaseUrl}/api/auth/vscode/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Redeem failed: HTTP ${res.status} — ${body}`);
+      }
+
+      const json = (await res.json()) as TokenExchangeResponse;
+      if (!json.ok || !json.accessToken || !json.refreshToken || !json.user) {
+        throw new Error(json.error || 'Invalid redeem response');
+      }
+
+      // Store BuildersHQ tokens
+      this.buildershqAccessToken = json.accessToken;
+      await this.context.secrets.store(BUILDERSHQ_ACCESS_TOKEN_KEY, json.accessToken);
+      await this.context.secrets.store(BUILDERSHQ_REFRESH_TOKEN_KEY, json.refreshToken);
+
+      // Set auth state from the server-provided user profile
+      // (no GitHub access token needed in the browser flow)
+      this.authState = {
+        user: json.user,
+        accessToken: '',
+        scopes: [],
+      };
+
+      await this.mongoStore?.upsertUser(json.user);
+
+      console.log(`[BuildersHQ Auth] Browser login complete: user=${json.user.githubLogin}`);
+
+      // Resolve the pending login promise
+      if (this.pendingBrowserLogin) {
+        clearTimeout(this.pendingBrowserLogin.timeoutId);
+        this.pendingBrowserLogin.resolve(json.user);
+        this.pendingBrowserLogin = undefined;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[BuildersHQ Auth] Browser login callback error: ${msg}`);
+      vscode.window.showErrorMessage(`BuildersHQ login failed: ${msg}`);
+      if (this.pendingBrowserLogin) {
+        clearTimeout(this.pendingBrowserLogin.timeoutId);
+        this.pendingBrowserLogin.resolve(undefined);
+        this.pendingBrowserLogin = undefined;
+      }
+    }
   }
 
   dispose(): void {
+    if (this.pendingBrowserLogin) {
+      clearTimeout(this.pendingBrowserLogin.timeoutId);
+      this.pendingBrowserLogin = undefined;
+    }
     this.disposables.forEach((d) => d.dispose());
     this.disposables.length = 0;
   }
