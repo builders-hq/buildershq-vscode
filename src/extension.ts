@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
+import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { PresenceTracker, PresenceStatus, ActivityReason } from './presence';
 import { HeartbeatService, HeartbeatUser } from './heartbeat';
@@ -6,9 +8,12 @@ import { StatusBarManager } from './statusBar';
 import { ClaudeCodeWatcher } from './claudeWatcher';
 import { CodexSessionWatcher } from './codexWatcher';
 import { GitCommitWatcher } from './gitWatcher';
+import { RoomWatcher } from './roomWatcher';
+import { playSound } from './soundPlayer';
 import { loadRuntimeConfig } from './env';
 import { MongoStore } from './mongoStore';
 import { GitHubAuthService } from './githubAuth';
+import { getWorkspaceId } from './workspace';
 
 const PAUSE_STATE_KEY = 'buildershq.paused';
 
@@ -20,6 +25,7 @@ let codexWatcher: CodexSessionWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
 let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
+let roomWatcher: RoomWatcher | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const sessionId = randomUUID();
@@ -43,6 +49,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   heartbeatService.resolveRepoInfo().catch(() => { /* repoUrl stays null */ });
   statusBarManager = new StatusBarManager();
+
+  // Room presence: play a door sound when a new person joins the workspace
+  const workspaceId = getWorkspaceId();
+  if (workspaceId) {
+    roomWatcher = new RoomWatcher(workspaceId, endpointUrl + '/current');
+    roomWatcher.onPersonJoined((name) => {
+      playSound(path.join(context.extensionPath, 'media', 'door.wav'));
+      vscode.window.showInformationMessage(`${name} joined the room`);
+    });
+  }
 
   const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
 
@@ -75,6 +91,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     claudeWatcher?.stop();
     codexWatcher?.stop();
     gitWatcher?.stop();
+    roomWatcher?.stop();
     updateStatusBar(context);
   });
 
@@ -91,6 +108,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (gitWatcher) {
       gitWatcher.start();
     }
+    roomWatcher?.start();
     updateStatusBar(context);
   });
 
@@ -191,6 +209,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   if (!isPaused) {
     heartbeatService.start('active', 'activate');
+    roomWatcher?.start();
   }
 
   // Claude Code activity tracking (opt-in)
@@ -445,6 +464,7 @@ export async function deactivate(): Promise<void> {
   claudeWatcher?.dispose();
   codexWatcher?.dispose();
   gitWatcher?.dispose();
+  roomWatcher?.dispose();
   presenceTracker = undefined;
   heartbeatService = undefined;
   statusBarManager = undefined;
@@ -453,4 +473,5 @@ export async function deactivate(): Promise<void> {
   gitWatcher = undefined;
   githubAuthService = undefined;
   mongoStore = undefined;
+  roomWatcher = undefined;
 }

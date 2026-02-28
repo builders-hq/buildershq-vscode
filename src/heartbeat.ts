@@ -45,6 +45,7 @@ interface ActivityBlock {
   filePath: string | null;
   command: string | null;
   summary: string;
+  promptPreview?: string;
   source: string;
   gitBranch?: string;
   slug?: string;
@@ -210,6 +211,7 @@ export class HeartbeatService {
       filePath: event.filePath,
       command: event.command,
       summary: event.summary,
+      ...(event.promptPreview && { promptPreview: event.promptPreview }),
       source,
       ...(event.gitBranch && { gitBranch: event.gitBranch }),
       ...(event.slug && { slug: event.slug }),
@@ -365,11 +367,8 @@ export class HeartbeatService {
       payload.activities = this.lastSentActivities;
     } else if (
       this.lastSentActivities.length > 0 &&
-      Date.now() - this.lastActivityAt < HeartbeatService.ACTIVITY_TTL_MS
+      Date.now() - this.lastActivityAt >= HeartbeatService.ACTIVITY_TTL_MS
     ) {
-      // No new activity but last known is still fresh — re-send
-      payload.activities = this.lastSentActivities;
-    } else if (this.lastSentActivities.length > 0) {
       // Expired — clear
       this.lastSentActivities = [];
     }

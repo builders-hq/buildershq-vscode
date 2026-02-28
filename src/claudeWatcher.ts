@@ -9,7 +9,9 @@ export type ClaudeActivityType =
   | 'editing'
   | 'running_command'
   | 'searching'
-  | 'idle';
+  | 'idle'
+  | 'prompting'
+  | 'rate_limited';
 
 export interface ClaudeActivityEvent {
   timestamp: number;
@@ -19,6 +21,7 @@ export interface ClaudeActivityEvent {
   filePath: string | null;
   command: string | null;
   summary: string;
+  promptPreview?: string;
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
@@ -118,6 +121,47 @@ function classifyContentBlock(
 
 function workspacePathToSlug(workspacePath: string): string {
   return workspacePath.replace(/:/g, '-').replace(/[\\/]/g, '-');
+}
+
+function processUserRecord(
+  record: Record<string, unknown>,
+  enqueue: (event: ClaudeActivityEvent) => void,
+): void {
+  const message = record.message as Record<string, unknown> | undefined;
+  if (!message || message.role !== 'user') { return; }
+  const content = message.content;
+  if (!Array.isArray(content)) { return; }
+
+  const timestampStr = record.timestamp as string | undefined;
+  const timestamp = timestampStr ? new Date(timestampStr).getTime() : Date.now();
+
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) { continue; }
+    const b = block as Record<string, unknown>;
+    if (b.type !== 'text') { continue; } // skip tool_result blocks
+
+    const rawText = b.text as string | undefined;
+    if (!rawText || rawText.trim().length === 0) { continue; }
+
+    const preview = rawText.length > 150 ? rawText.slice(0, 150) + '...' : rawText;
+
+    console.log(`[BuildersHQ:Claude] prompting event — slug=${record.slug} branch=${record.gitBranch} preview="${preview}"`);
+
+    enqueue({
+      timestamp,
+      claudeSessionId: (record.sessionId as string) || '',
+      activityType: 'prompting',
+      tool: null,
+      filePath: null,
+      command: null,
+      summary: 'Prompting Claude',
+      promptPreview: preview,
+      gitBranch: truncate(record.gitBranch as string, 256) ?? undefined,
+      slug: truncate(record.slug as string, 256) ?? undefined,
+      isSidechain: typeof record.isSidechain === 'boolean' ? record.isSidechain : undefined,
+    });
+    break; // one event per user turn (first non-empty text block only)
+  }
 }
 
 export class ClaudeCodeWatcher implements vscode.Disposable {
@@ -415,7 +459,10 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
       return; // Skip unparseable lines silently
     }
 
-    // Only process assistant messages
+    if (record.type === 'user') {
+      processUserRecord(record, (event) => this.enqueueEvent(event));
+      return;
+    }
     if (record.type !== 'assistant') { return; }
 
     const message = record.message as Record<string, unknown> | undefined;
@@ -427,6 +474,32 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     // Parse timestamp from ISO string
     const timestampStr = record.timestamp as string | undefined;
     const timestamp = timestampStr ? new Date(timestampStr).getTime() : Date.now();
+
+    // Detect Claude rate limit notification (synthetic model, no real tokens)
+    if (message.model === '<synthetic>') {
+      for (const block of content) {
+        if (typeof block !== 'object' || block === null) { continue; }
+        const b = block as Record<string, unknown>;
+        if (b.type !== 'text') { continue; }
+        const text = (b.text as string | undefined)?.trim();
+        if (!text || !text.includes("You've hit your limit")) { continue; }
+        console.log(`[BuildersHQ:Claude] rate_limited event — slug=${record.slug} message="${text}"`);
+        this.enqueueEvent({
+          timestamp,
+          claudeSessionId: (record.sessionId as string) || '',
+          activityType: 'rate_limited',
+          tool: null,
+          filePath: null,
+          command: null,
+          summary: text,
+          gitBranch: truncate(record.gitBranch as string, 256) ?? undefined,
+          slug: truncate(record.slug as string, 256) ?? undefined,
+          isSidechain: typeof record.isSidechain === 'boolean' ? record.isSidechain : undefined,
+        });
+        break;
+      }
+      return; // Don't process synthetic records further
+    }
 
     const aiModel = truncate(message.model as string, 64) ?? undefined;
     const usage = message.usage as Record<string, unknown> | undefined;
