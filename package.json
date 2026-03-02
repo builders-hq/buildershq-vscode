@@ -14,6 +14,9 @@
     "productivity",
     "claude",
     "codex",
+    "opencode",
+    "gemini",
+    "aider",
     "git",
     "status"
   ],
@@ -114,6 +117,36 @@
           "type": "string",
           "default": "",
           "description": "Override path to OpenAI Codex sessions directory. Leave empty for auto-detection (~/.codex/sessions)."
+        },
+        "buildershq.opencode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Opencode (sst/opencode) activity tracking."
+        },
+        "buildershq.opencode.transcriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to Opencode storage directory. Leave empty for auto-detection (~/.local/share/opencode/storage)."
+        },
+        "buildershq.gemini.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Gemini CLI activity tracking."
+        },
+        "buildershq.gemini.transcriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to Gemini CLI chats directory. Leave empty for auto-detection (~/.gemini/chats)."
+        },
+        "buildershq.aider.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Aider activity tracking (watches .aider.chat.history.md)."
+        },
+        "buildershq.aider.transcriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to Aider chat history file. Leave empty for auto-detection (.aider.chat.history.md in workspace root)."
         },
         "buildershq.sharedEnvFilePath": {
           "type": "string",

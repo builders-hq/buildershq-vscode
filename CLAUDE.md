@@ -52,6 +52,40 @@ A VS Code extension that tracks developer presence and sends heartbeats to a Bui
 - Source in payload: `"codex"`.
 - Enabled by default (`buildershq.codex.enabled`).
 
+### Opencode activity tracking
+
+- Watches `~/.local/share/opencode/storage/` for session and message JSON files.
+- Scans `session/<project-id>/ses_*.json` to find sessions matching the current workspace via `path.cwd`.
+- Watches `message/<session-id>/` directories for new `msg_*.json` files.
+- Parses message JSON for role (`user`/`assistant`), tool use blocks, model, and token counts.
+- Classifies tools heuristically by name (read, edit, bash, grep, etc.).
+- Source in payload: `"opencode"`.
+- Enabled by default (`buildershq.opencode.enabled`).
+- Override path: `buildershq.opencode.transcriptPath`.
+
+### Gemini CLI activity tracking
+
+- Watches `~/.gemini/tmp/<project_hash>/chats/session-*.json`.
+- `<project_hash>` is SHA-256 of the workspace root path (auto-scoped to project).
+- Session files are monolithic JSON arrays of Gemini API Content objects (`[{ role, parts }]`).
+- Detects `functionCall` parts for tool activity (`read_file`, `write_file`, `run_shell_command`, etc.).
+- Tracks message count delta to detect new messages (file is rewritten on each turn).
+- Source in payload: `"gemini"`.
+- Enabled by default (`buildershq.gemini.enabled`).
+- Override path: `buildershq.gemini.transcriptPath`.
+
+### Aider activity tracking
+
+- Watches `.aider.chat.history.md` in the workspace root (append-only Markdown).
+- Uses byte-offset streaming (same as JSONL watchers) to detect new content.
+- Parses Markdown structure:
+  - `#### <text>` lines → user prompts or `/commands`.
+  - `<<<<<<< SEARCH` / code blocks → editing activity.
+  - Everything else → assistant thinking.
+- Source in payload: `"aider"`.
+- Enabled by default (`buildershq.aider.enabled`).
+- Override path: `buildershq.aider.transcriptPath`.
+
 ### Git commit tracking
 
 - Watches `.git/refs/heads/` and `.git/HEAD` using `fs.watch`.
@@ -68,9 +102,12 @@ src/
 |- presence.ts       # Presence state machine and editor/focus event tracking
 |- workspace.ts      # Workspace identity and repository metadata
 |- claudeWatcher.ts  # Claude transcript watcher/parser
-|- codexWatcher.ts   # Codex sessions watcher/parser
-|- gitWatcher.ts     # Git refs watcher
-`- statusBar.ts      # Status bar UI state
+|- codexWatcher.ts      # Codex sessions watcher/parser
+|- opencodeWatcher.ts   # Opencode sessions watcher/parser
+|- geminiWatcher.ts     # Gemini CLI sessions watcher/parser
+|- aiderWatcher.ts      # Aider chat history watcher/parser
+|- gitWatcher.ts        # Git refs watcher
+`- statusBar.ts         # Status bar UI state
 ```
 
 ## Gotchas
