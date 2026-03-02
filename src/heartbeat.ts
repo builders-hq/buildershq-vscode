@@ -4,6 +4,7 @@ import * as path from 'path';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
 import { ClaudeActivityEvent } from './claudeWatcher';
+import { ClaimToken } from './githubAuth';
 
 const ENDPOINT_URL = 'https://buildershq.net/api/presence';
 const CLIENT_TYPE = 'vscode';
@@ -92,6 +93,7 @@ export interface HeartbeatPayload {
   debugType?: string | null;
   taskName?: string | null;
   multiRootWorkspace?: boolean;
+  machineToken?: string;
   user?: HeartbeatUser;
   activities?: ActivityBlock[];
 }
@@ -100,6 +102,7 @@ interface HeartbeatServiceOptions {
   endpointUrl?: string;
   getUser?: () => HeartbeatUser | undefined;
   getAccessToken?: () => string | undefined;
+  getMachineToken?: () => string | undefined;
   persistPayload?: (payload: HeartbeatPayload) => Promise<void>;
 }
 
@@ -111,6 +114,7 @@ export class HeartbeatService {
   private connected: boolean = false;
   private onConnectionChangeCallback: ((connected: boolean) => void) | undefined;
   private onAuthFailureCallback: (() => void) | undefined;
+  private onClaimTokenCallback: ((claim: ClaimToken) => void) | undefined;
 
   // Session tracking
   private sessionId: string;
@@ -140,6 +144,7 @@ export class HeartbeatService {
   private endpointUrl: string;
   private readonly getUser: (() => HeartbeatUser | undefined) | undefined;
   private readonly getAccessToken: (() => string | undefined) | undefined;
+  private readonly getMachineToken: (() => string | undefined) | undefined;
   private readonly persistPayload: ((payload: HeartbeatPayload) => Promise<void>) | undefined;
 
   constructor(
@@ -152,6 +157,7 @@ export class HeartbeatService {
     this.endpointUrl = options.endpointUrl ?? ENDPOINT_URL;
     this.getUser = options.getUser;
     this.getAccessToken = options.getAccessToken;
+    this.getMachineToken = options.getMachineToken;
     this.persistPayload = options.persistPayload;
   }
 
@@ -166,6 +172,10 @@ export class HeartbeatService {
 
   onAuthFailure(callback: () => void): void {
     this.onAuthFailureCallback = callback;
+  }
+
+  onClaimToken(callback: (claim: ClaimToken) => void): void {
+    this.onClaimTokenCallback = callback;
   }
 
   onPresenceStateChange(
@@ -364,6 +374,13 @@ export class HeartbeatService {
     if (user) {
       payload.user = user;
     }
+    // Always include machineToken as the stable machine identity.
+    // The server uses this random secret (not spoofable computerName) for
+    // machine correlation, desk grouping, and claim-token delivery.
+    const machineToken = this.getMachineToken?.();
+    if (machineToken) {
+      payload.machineToken = machineToken;
+    }
 
     if (this.pendingActivities.size > 0) {
       // Merge new activities with existing, keyed by claudeSessionId
@@ -417,10 +434,19 @@ export class HeartbeatService {
       console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
       this.heartbeatInFlight = false;
 
-      // Auth failure — don't treat as connection error, emit separate callback
+      // Auth failure handling
       if (res.status === 401) {
-        console.log('[BuildersHQ] Authentication failed (401)');
-        this.onAuthFailureCallback?.();
+        const hadToken = Boolean(this.getAccessToken?.());
+        if (hadToken) {
+          // Token was sent but rejected — try to refresh/re-exchange
+          console.log('[BuildersHQ] Authentication failed (401) — token rejected');
+          this.onAuthFailureCallback?.();
+        } else {
+          // No token was sent (anonymous mode) — the server doesn't support
+          // anonymous heartbeats.  Treat as a soft failure: mark disconnected
+          // so the status bar shows the issue, but don't trigger auth recovery.
+          console.log('[BuildersHQ] Anonymous heartbeat rejected (401) — server requires auth');
+        }
         return;
       }
 
@@ -431,6 +457,13 @@ export class HeartbeatService {
       if (success) {
         this.currentBackoffIndex = 0;
         this.cancelRetry();
+
+        // Check for reverse-identification claim token in the response.
+        // Only parse the body when anonymous (no access token) to avoid
+        // needless JSON parsing on every authenticated heartbeat.
+        if (!this.getAccessToken?.() && this.onClaimTokenCallback) {
+          await this.tryReadClaimToken(res);
+        }
       } else {
         this.scheduleRetry();
       }
@@ -471,6 +504,45 @@ export class HeartbeatService {
     if (this.retryTimer !== undefined) {
       clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
+    }
+  }
+
+  /**
+   * Try to read a claimToken from the heartbeat response body.
+   * The server includes this when a user has logged in on the website and
+   * claimed this machineToken.  Safe to call on any response — silently
+   * ignores empty bodies, non-JSON, or missing fields.
+   */
+  private async tryReadClaimToken(res: Response): Promise<void> {
+    try {
+      const body = await res.json() as Record<string, unknown>;
+      if (!body || typeof body !== 'object' || !body.claimToken) {
+        return;
+      }
+      const ct = body.claimToken as Record<string, unknown>;
+      if (typeof ct.accessToken !== 'string' || typeof ct.refreshToken !== 'string' ||
+          !ct.user || typeof ct.user !== 'object') {
+        return;
+      }
+      const user = ct.user as Record<string, unknown>;
+      if (typeof user.githubUserId !== 'number' || typeof user.githubLogin !== 'string') {
+        return;
+      }
+      console.log(`[BuildersHQ] Claim token received for @${user.githubLogin}`);
+      this.onClaimTokenCallback!({
+        accessToken: ct.accessToken as string,
+        refreshToken: ct.refreshToken as string,
+        user: {
+          githubUserId: user.githubUserId as number,
+          githubLogin: user.githubLogin as string,
+          name: (user.name as string | null) ?? null,
+          email: (user.email as string | null) ?? null,
+          avatarUrl: (user.avatarUrl as string | null) ?? null,
+        },
+      });
+    } catch {
+      // Response body was not valid JSON or empty — normal for most
+      // heartbeat responses.  Silently ignore.
     }
   }
 

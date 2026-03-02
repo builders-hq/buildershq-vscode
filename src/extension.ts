@@ -51,10 +51,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register URI handler for browser-based login callback
   const uriHandlerDisposable = githubAuthService.registerUriHandler(serverBaseUrl);
 
+  // Initialize machineToken before creating HeartbeatService so
+  // the getter is available from the first heartbeat.
+  await githubAuthService.initMachineToken();
+
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
     getUser: () => getHeartbeatUser(),
     getAccessToken: () => githubAuthService?.getBuildersHQAccessToken(),
+    getMachineToken: () => githubAuthService?.getMachineToken(),
     persistPayload: async (payload) => {
       await mongoStore?.saveHeartbeat(payload);
     },
@@ -94,12 +99,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     updateStatusBar(context);
   });
 
-  // Wire auth failure → try refresh, re-exchange, or prompt login
+  // Wire auth failure → try refresh, re-exchange, or fall back to anonymous
   heartbeatService.onAuthFailure(async () => {
     console.log('[BuildersHQ] Handling auth failure — attempting token refresh');
     const refreshed = await githubAuthService!.refreshBuildersHQToken(serverBaseUrl);
     if (refreshed) {
       console.log('[BuildersHQ] Token refreshed successfully');
+      updateStatusBar(context);
       return;
     }
 
@@ -107,12 +113,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
     if (exchanged) {
       console.log('[BuildersHQ] Token re-exchanged successfully');
+      updateStatusBar(context);
       return;
     }
 
-    console.log('[BuildersHQ] All token recovery failed — stopping tracking');
-    stopTracking();
-    promptLogin(context);
+    // Don't stop tracking — fall back to anonymous mode.
+    // The server accepts unauthenticated heartbeats keyed by computerName.
+    console.log('[BuildersHQ] All token recovery failed — continuing in anonymous mode');
+    await githubAuthService!.logout();
+    updateStatusBar(context);
+  });
+
+  // Wire reverse-identification via heartbeat response: when the server
+  // delivers a claim token (user logged in on website for this machineToken),
+  // automatically upgrade from anonymous to authenticated mode.
+  heartbeatService.onClaimToken(async (claim) => {
+    try {
+      console.log(`[BuildersHQ] Received claim token for @${claim.user.githubLogin}`);
+      const accepted = await githubAuthService!.acceptClaimToken(claim);
+      if (!accepted) { return; }
+
+      vscode.window.showInformationMessage(
+        `BuildersHQ: You've been identified as @${claim.user.githubLogin}`,
+      );
+      heartbeatService!.forceHeartbeat('activate');
+      updateStatusBar(context);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[BuildersHQ] Failed to process claim token: ${msg}`);
+    }
+  });
+
+  // Wire website-initiated identification via vscode:// URI redirect.
+  // When the user logs in on buildershq.net and clicks "Connect VS Code",
+  // the URI handler fires handleAuthCallback without a pending browser login.
+  githubAuthService.onIdentified((user) => {
+    console.log(`[BuildersHQ] Website-initiated identification: @${user.githubLogin}`);
+    vscode.window.showInformationMessage(
+      `BuildersHQ: You've been identified as @${user.githubLogin}`,
+    );
+    startTracking(context);
+    heartbeatService!.forceHeartbeat('activate');
+    updateStatusBar(context);
   });
 
   // Pause / Resume commands
@@ -153,7 +195,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (user) {
         console.log(`[BuildersHQ] Browser login succeeded: ${user.githubLogin}`);
         vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
+        // Tracking is already running — just ensure it's started and force a heartbeat
+        // so the server immediately sees the identified user for this computerName.
         startTracking(context);
+        heartbeatService!.forceHeartbeat('activate');
         updateStatusBar(context);
         return;
       }
@@ -167,6 +212,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
         if (exchanged) {
           startTracking(context);
+          heartbeatService!.forceHeartbeat('activate');
         } else {
           vscode.window.showWarningMessage(
             'BuildersHQ: Logged in to GitHub but could not connect to the BuildersHQ server.',
@@ -271,31 +317,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Start presence tracker always (needed for status tracking)
   presenceTracker.start();
 
-  // Attempt to start tracking if authenticated
+  // Always start tracking — anonymous heartbeats use computerName as the
+  // machine identifier.  When the user later logs in (from the extension or
+  // the BuildersHQ website on the same machine) the server can retroactively
+  // associate these events with the authenticated GitHub identity.
   console.log(`[BuildersHQ] Activation auth check: isAuthenticated=${githubAuthService.isAuthenticated()}, hasApiToken=${Boolean(githubAuthService.getBuildersHQAccessToken())}, user=${githubAuthService.getUserProfile()?.githubLogin ?? 'none'}`);
-  if (githubAuthService.isAuthenticated()) {
-    if (githubAuthService.getBuildersHQAccessToken()) {
-      // Fully authenticated — start immediately
-      console.log('[BuildersHQ] Fully authenticated — starting tracking immediately');
-      startTracking(context);
-    } else {
-      // Has GitHub but no BuildersHQ token — exchange
-      console.log('[BuildersHQ] Has GitHub auth but no API token — exchanging');
-      const exchanged = await githubAuthService.exchangeForBuildersHQToken(serverBaseUrl);
-      if (exchanged) {
-        console.log('[BuildersHQ] Token exchange succeeded — starting tracking');
-        startTracking(context);
-      } else {
-        // Server unreachable or token invalid — show as not connected
-        // Will retry on next login or when server becomes available
-        console.log('[BuildersHQ] Token exchange failed on activation — prompting login');
-        promptLogin(context);
-      }
-    }
-  } else {
-    // Not authenticated at all — prompt login
-    console.log('[BuildersHQ] Not authenticated — prompting login');
-    promptLogin(context);
+
+  if (githubAuthService.isAuthenticated() && !githubAuthService.getBuildersHQAccessToken()) {
+    // Has GitHub token but no BuildersHQ JWT — try to exchange
+    console.log('[BuildersHQ] Has GitHub auth but no API token — exchanging');
+    await githubAuthService.exchangeForBuildersHQToken(serverBaseUrl);
+  }
+
+  // Start tracking regardless of auth state
+  console.log('[BuildersHQ] Starting tracking (anonymous mode supported)');
+  startTracking(context);
+
+  // Only suggest login when we have no GitHub identity at all.
+  // If restoreSession() silently picked up a VS Code GitHub session, the
+  // user profile is already included in heartbeats alongside machineToken —
+  // no need to nag them.
+  if (!githubAuthService.isAuthenticated()) {
+    suggestLogin();
   }
 
   updateStatusBar(context);
@@ -362,25 +405,13 @@ function stopTracking(): void {
   roomWatcher?.stop();
 }
 
-async function promptLogin(context: vscode.ExtensionContext): Promise<void> {
-  console.log('[BuildersHQ] promptLogin() — opening browser for login');
-  updateStatusBar(context);
-
-  // Auto-open the browser for a full-page login experience
-  const user = await githubAuthService!.loginViaBrowser(serverBaseUrl);
-  if (user) {
-    console.log(`[BuildersHQ] Browser login succeeded: ${user.githubLogin}`);
-    vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
-    startTracking(context);
-    updateStatusBar(context);
-    return;
-  }
-
-  // Fallback: show notification for manual login
-  console.log('[BuildersHQ] Browser login timed out — showing notification fallback');
+function suggestLogin(): void {
+  console.log('[BuildersHQ] suggestLogin() — showing non-blocking login suggestion');
+  // Non-intrusive notification — tracking is already running in anonymous mode
   vscode.window.showInformationMessage(
-    'BuildersHQ requires GitHub login to track your presence.',
+    'BuildersHQ is tracking your activity. Log in with GitHub to claim your events.',
     'Login with GitHub',
+    'Later',
   ).then((choice) => {
     if (choice === 'Login with GitHub') {
       vscode.commands.executeCommand('buildershq.loginWithGitHub');
@@ -599,7 +630,7 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   const authenticated = githubAuthService?.isFullyAuthenticated() ?? false;
   const claudeActive = claudeWatcher?.isWatching() ?? false;
   const codexActive = codexWatcher?.isWatching() ?? false;
-  statusBarManager.update(status, paused, connected, authenticated, claudeActive, codexActive);
+  statusBarManager.update(status, paused, connected, authenticated, trackingStarted, claudeActive, codexActive);
 }
 
 export async function deactivate(): Promise<void> {

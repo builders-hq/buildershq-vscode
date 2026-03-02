@@ -5,6 +5,7 @@ import { RuntimeConfig } from './env';
 const ACCESS_TOKEN_SECRET_KEY = 'buildershq.github.accessToken';
 const BUILDERSHQ_ACCESS_TOKEN_KEY = 'buildershq.api.accessToken';
 const BUILDERSHQ_REFRESH_TOKEN_KEY = 'buildershq.api.refreshToken';
+const MACHINE_TOKEN_KEY = 'buildershq.machineToken';
 const LOGIN_SCOPES = 'read:user user:email';
 const VSCODE_GITHUB_PROVIDER = 'github';
 const VSCODE_GITHUB_SCOPES = ['read:user', 'user:email'];
@@ -68,20 +69,38 @@ type TokenExchangeResponse = {
   error?: string;
 };
 
+export interface ClaimToken {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    githubUserId: number;
+    githubLogin: string;
+    name: string | null;
+    email: string | null;
+    avatarUrl: string | null;
+  };
+}
+
 export class GitHubAuthService implements vscode.Disposable {
   private authState: GitHubAuthState | undefined;
   private buildershqAccessToken: string | undefined;
+  private machineToken: string | undefined;
   private readonly disposables: vscode.Disposable[] = [];
   private pendingBrowserLogin: {
     resolve: (profile: GitHubUserProfile | undefined) => void;
     timeoutId: ReturnType<typeof setTimeout>;
   } | undefined;
+  private onIdentifiedCallback: ((user: GitHubUserProfile) => void) | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly getConfig: () => RuntimeConfig,
     private readonly mongoStore?: MongoStore,
   ) {}
+
+  onIdentified(callback: (user: GitHubUserProfile) => void): void {
+    this.onIdentifiedCallback = callback;
+  }
 
   getUserProfile(): GitHubUserProfile | undefined {
     return this.authState?.user;
@@ -97,6 +116,60 @@ export class GitHubAuthService implements vscode.Disposable {
 
   isFullyAuthenticated(): boolean {
     return Boolean(this.authState) && Boolean(this.buildershqAccessToken);
+  }
+
+  /** Returns a persistent random token that identifies this machine. */
+  getMachineToken(): string | undefined {
+    return this.machineToken;
+  }
+
+  /** Restore or generate the machineToken (call once during activation). */
+  async initMachineToken(): Promise<string> {
+    const stored = await this.context.secrets.get(MACHINE_TOKEN_KEY);
+    if (stored) {
+      this.machineToken = stored;
+      return stored;
+    }
+    // Generate a new random token and persist it.
+    // crypto.randomUUID() is available in Node 19+ and VS Code's Electron.
+    const token = (await import('crypto')).randomUUID();
+    await this.context.secrets.store(MACHINE_TOKEN_KEY, token);
+    this.machineToken = token;
+    console.log('[BuildersHQ Auth] Generated new machineToken');
+    return token;
+  }
+
+  /**
+   * Accept a claim token delivered via heartbeat response.
+   * Returns true if the claim was accepted (extension was anonymous).
+   */
+  async acceptClaimToken(claim: ClaimToken): Promise<boolean> {
+    if (this.isFullyAuthenticated()) {
+      console.log('[BuildersHQ Auth] acceptClaimToken() — already authenticated, ignoring');
+      return false;
+    }
+
+    console.log(`[BuildersHQ Auth] acceptClaimToken() — claiming as @${claim.user.githubLogin}`);
+
+    this.buildershqAccessToken = claim.accessToken;
+    await this.context.secrets.store(BUILDERSHQ_ACCESS_TOKEN_KEY, claim.accessToken);
+    await this.context.secrets.store(BUILDERSHQ_REFRESH_TOKEN_KEY, claim.refreshToken);
+
+    this.authState = {
+      user: {
+        githubUserId: claim.user.githubUserId,
+        githubLogin: claim.user.githubLogin,
+        name: claim.user.name,
+        email: claim.user.email,
+        avatarUrl: claim.user.avatarUrl,
+      },
+      accessToken: '',
+      scopes: [],
+    };
+
+    await this.mongoStore?.upsertUser(this.authState.user);
+    console.log(`[BuildersHQ Auth] acceptClaimToken() complete: user=${claim.user.githubLogin}`);
+    return true;
   }
 
   async restoreSession(): Promise<void> {
@@ -389,11 +462,16 @@ export class GitHubAuthService implements vscode.Disposable {
 
       console.log(`[BuildersHQ Auth] Browser login complete: user=${json.user.githubLogin}`);
 
-      // Resolve the pending login promise
+      // Resolve the pending login promise, or fire the identified callback
+      // for website-initiated logins (no pending promise).
       if (this.pendingBrowserLogin) {
         clearTimeout(this.pendingBrowserLogin.timeoutId);
         this.pendingBrowserLogin.resolve(json.user);
         this.pendingBrowserLogin = undefined;
+      } else {
+        // Website-initiated: user logged in on buildershq.net and clicked
+        // "Connect VS Code" — no promise to resolve, notify via callback.
+        this.onIdentifiedCallback?.(json.user);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
