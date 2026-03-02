@@ -374,11 +374,11 @@ export class HeartbeatService {
     if (user) {
       payload.user = user;
     }
-    // Include machineToken for anonymous identification.
-    // The server uses this random secret (not spoofable computerName) to
-    // securely deliver claim tokens when the user logs in on the website.
+    // Always include machineToken as the stable machine identity.
+    // The server uses this random secret (not spoofable computerName) for
+    // machine correlation, desk grouping, and claim-token delivery.
     const machineToken = this.getMachineToken?.();
-    if (machineToken && !this.getAccessToken?.()) {
+    if (machineToken) {
       payload.machineToken = machineToken;
     }
 

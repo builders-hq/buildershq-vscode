@@ -333,8 +333,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log('[BuildersHQ] Starting tracking (anonymous mode supported)');
   startTracking(context);
 
-  // If not authenticated, show a gentle, non-blocking suggestion to log in
-  if (!githubAuthService.isFullyAuthenticated()) {
+  // Only suggest login when we have no GitHub identity at all.
+  // If restoreSession() silently picked up a VS Code GitHub session, the
+  // user profile is already included in heartbeats alongside machineToken —
+  // no need to nag them.
+  if (!githubAuthService.isFullyAuthenticated() && !githubAuthService.isAuthenticated()) {
     suggestLogin();
   }
 

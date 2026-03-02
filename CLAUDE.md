@@ -25,10 +25,10 @@ A VS Code extension that tracks developer presence and sends heartbeats to a Bui
 ### Delayed identification (anonymous mode)
 
 - Tracking starts immediately on activation, even without GitHub login.
-- Anonymous heartbeats are sent with `computerName` as the machine identifier and no `Authorization` header.
-- Each machine gets a persistent random `machineToken` (UUID stored in SecretStorage). Anonymous heartbeats include this token so the server can securely identify the machine without relying on the spoofable `computerName`.
-- The server can accept anonymous heartbeats and key them by `machineToken`.
-- A non-blocking notification suggests the user can log in with GitHub to claim their events.
+- Every heartbeat includes the persistent `machineToken` (UUID stored in SecretStorage) as the stable machine identity — regardless of authentication state. The server uses this for machine correlation, desk grouping, and claim-token delivery.
+- On activation, `restoreSession()` silently checks for an existing VS Code GitHub session (`createIfNone: false, silent: true`). If the user has previously signed into GitHub in VS Code (for any extension), their profile is included in heartbeats alongside `machineToken` — even without a BuildersHQ JWT.
+- The login suggestion notification is only shown when there is no GitHub identity at all. Users who already have a VS Code GitHub session are not nagged.
+- Anonymous heartbeats (no GitHub identity) are sent with `computerName` + `machineToken` as identifiers and no `Authorization` header.
 - The status bar shows `Active $(link)` with a tooltip prompting login while in anonymous mode.
 - If the server rejects anonymous heartbeats (401 without a token), the extension stays running and shows "Not Connected" — it does not aggressively prompt for login.
 
