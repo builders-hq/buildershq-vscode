@@ -26,11 +26,28 @@ A VS Code extension that tracks developer presence and sends heartbeats to a Bui
 
 - Tracking starts immediately on activation, even without GitHub login.
 - Anonymous heartbeats are sent with `computerName` as the machine identifier and no `Authorization` header.
-- The server can accept these and key them by `computerName`.
+- Each machine gets a persistent random `machineToken` (UUID stored in SecretStorage). Anonymous heartbeats include this token so the server can securely identify the machine without relying on the spoofable `computerName`.
+- The server can accept anonymous heartbeats and key them by `machineToken`.
 - A non-blocking notification suggests the user can log in with GitHub to claim their events.
-- When the user later logs in (from VS Code or the BuildersHQ website on the same machine), the server retroactively associates all prior anonymous events from that `computerName` with the authenticated GitHub identity.
 - The status bar shows `Active $(link)` with a tooltip prompting login while in anonymous mode.
 - If the server rejects anonymous heartbeats (401 without a token), the extension stays running and shows "Not Connected" — it does not aggressively prompt for login.
+
+### Reverse identification (website-initiated login)
+
+Two mechanisms allow the user to identify from the BuildersHQ website:
+
+1. **`vscode://` URI redirect (primary, most secure):**
+   - User logs in on buildershq.net → website shows "Connect VS Code" button.
+   - Clicking it opens `vscode://buildershq/auth-callback?code=XXXXX` (one-time code).
+   - The extension's existing URI handler redeems the code → tokens stored → identified.
+   - Uses the `onIdentified` callback when no `pendingBrowserLogin` promise exists.
+   - Secure: `vscode://` targets only the local machine, one-time code over HTTPS.
+
+2. **Heartbeat response piggyback (automatic, secondary):**
+   - When the server recognizes a `machineToken` has been claimed (user logged in on website), it includes a `claimToken` (JWT + refresh token + user profile) in the heartbeat response.
+   - The extension parses the response body only when anonymous (no access token), validates the `claimToken` structure, and calls `acceptClaimToken()` on the auth service.
+   - Secure: `machineToken` is a random UUID stored in SecretStorage — cannot be guessed from `computerName`.
+   - Idempotent: three layers prevent duplicate processing (no body parse when authenticated, guard in `acceptClaimToken`, guard in callback).
 
 ### Status transitions
 

@@ -51,10 +51,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register URI handler for browser-based login callback
   const uriHandlerDisposable = githubAuthService.registerUriHandler(serverBaseUrl);
 
+  // Initialize machineToken before creating HeartbeatService so
+  // the getter is available from the first heartbeat.
+  await githubAuthService.initMachineToken();
+
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
     getUser: () => getHeartbeatUser(),
     getAccessToken: () => githubAuthService?.getBuildersHQAccessToken(),
+    getMachineToken: () => githubAuthService?.getMachineToken(),
     persistPayload: async (payload) => {
       await mongoStore?.saveHeartbeat(payload);
     },
@@ -116,6 +121,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // The server accepts unauthenticated heartbeats keyed by computerName.
     console.log('[BuildersHQ] All token recovery failed — continuing in anonymous mode');
     await githubAuthService!.logout();
+    updateStatusBar(context);
+  });
+
+  // Wire reverse-identification via heartbeat response: when the server
+  // delivers a claim token (user logged in on website for this machineToken),
+  // automatically upgrade from anonymous to authenticated mode.
+  heartbeatService.onClaimToken(async (claim) => {
+    try {
+      console.log(`[BuildersHQ] Received claim token for @${claim.user.githubLogin}`);
+      const accepted = await githubAuthService!.acceptClaimToken(claim);
+      if (!accepted) { return; }
+
+      vscode.window.showInformationMessage(
+        `BuildersHQ: You've been identified as @${claim.user.githubLogin}`,
+      );
+      heartbeatService!.forceHeartbeat('activate');
+      updateStatusBar(context);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[BuildersHQ] Failed to process claim token: ${msg}`);
+    }
+  });
+
+  // Wire website-initiated identification via vscode:// URI redirect.
+  // When the user logs in on buildershq.net and clicks "Connect VS Code",
+  // the URI handler fires handleAuthCallback without a pending browser login.
+  githubAuthService.onIdentified((user) => {
+    console.log(`[BuildersHQ] Website-initiated identification: @${user.githubLogin}`);
+    vscode.window.showInformationMessage(
+      `BuildersHQ: You've been identified as @${user.githubLogin}`,
+    );
+    startTracking(context);
+    heartbeatService!.forceHeartbeat('activate');
     updateStatusBar(context);
   });
 
