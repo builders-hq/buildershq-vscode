@@ -337,7 +337,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // If restoreSession() silently picked up a VS Code GitHub session, the
   // user profile is already included in heartbeats alongside machineToken —
   // no need to nag them.
-  if (!githubAuthService.isFullyAuthenticated() && !githubAuthService.isAuthenticated()) {
+  if (!githubAuthService.isAuthenticated()) {
     suggestLogin();
   }
 
