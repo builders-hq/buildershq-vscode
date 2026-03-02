@@ -2,7 +2,7 @@
   "name": "buildershq",
   "displayName": "BuildersHQ",
   "description": "Track your developer presence across workspaces. Reports your active, idle, or away status — including Claude Code and git activity — to buildershq.net or a self-hosted server.",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "publisher": "buildershq",
   "license": "MIT",
   "icon": "icon.png",
