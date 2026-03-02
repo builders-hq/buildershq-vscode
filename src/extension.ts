@@ -41,10 +41,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   presenceTracker = new PresenceTracker();
   const cfg = vscode.workspace.getConfiguration('buildershq');
   const runtimeCfg = loadRuntimeConfig(isDev);
-  console.log(`[BuildersHQ] Runtime config: envPath=${runtimeCfg.envPath}, presenceServerUrl=${runtimeCfg.presenceServerUrl || '(empty)'}`);
   const endpointUrl = runtimeCfg.presenceServerUrl ||
     cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
-  console.log(`[BuildersHQ] Resolved endpointUrl=${endpointUrl}`);
   // Auth always uses the VS Code setting (not .env override) so it hits production
   const authEndpointUrl = cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
   serverBaseUrl = authEndpointUrl.replace(/\/api\/presence\/?$/, '');
@@ -55,6 +53,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Initialize machineToken before creating HeartbeatService so
   // the getter is available from the first heartbeat.
   await githubAuthService.initMachineToken();
+
+  const machineToken = githubAuthService.getMachineToken() ?? '';
+  const userProfile = githubAuthService.getUserProfile();
+  const workspaceId = getWorkspaceId();
+  console.log(
+    `[BuildersHQ] ── Startup ──────────────────────────\n` +
+    `  mode:          ${isDev ? 'Development' : 'Production'}\n` +
+    `  endpointUrl:   ${endpointUrl}\n` +
+    `  serverBaseUrl: ${serverBaseUrl}\n` +
+    `  .env path:     ${runtimeCfg.envPath}\n` +
+    `  .env active:   ${isDev}\n` +
+    `  computerName:  ${os.hostname()}\n` +
+    `  machineToken:  ${machineToken.slice(0, 8) || '(none)'}...\n` +
+    `  authenticated: ${githubAuthService.isAuthenticated()}\n` +
+    `  apiToken:      ${Boolean(githubAuthService.getBuildersHQAccessToken())}\n` +
+    `  user:          ${userProfile ? `@${userProfile.githubLogin}` : '(anonymous)'}\n` +
+    `  sessionId:     ${sessionId}\n` +
+    `  workspaceId:   ${workspaceId ?? '(none)'}\n` +
+    `[BuildersHQ] ─────────────────────────────────────`,
+  );
 
   heartbeatService = new HeartbeatService(sessionId, () => presenceTracker!.isFocused(), {
     endpointUrl,
@@ -69,7 +87,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   statusBarManager = new StatusBarManager();
 
   // Room presence: play a door sound when a new person joins the workspace
-  const workspaceId = getWorkspaceId();
   if (workspaceId) {
     roomWatcher = new RoomWatcher(workspaceId, endpointUrl + '/current');
     roomWatcher.onPersonJoined((name) => {
@@ -322,8 +339,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // machine identifier.  When the user later logs in (from the extension or
   // the BuildersHQ website on the same machine) the server can retroactively
   // associate these events with the authenticated GitHub identity.
-  console.log(`[BuildersHQ] Activation auth check: isAuthenticated=${githubAuthService.isAuthenticated()}, hasApiToken=${Boolean(githubAuthService.getBuildersHQAccessToken())}, user=${githubAuthService.getUserProfile()?.githubLogin ?? 'none'}`);
-
   if (githubAuthService.isAuthenticated() && !githubAuthService.getBuildersHQAccessToken()) {
     // Has GitHub token but no BuildersHQ JWT — try to exchange
     console.log('[BuildersHQ] Has GitHub auth but no API token — exchanging');
