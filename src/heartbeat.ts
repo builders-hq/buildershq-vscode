@@ -417,10 +417,19 @@ export class HeartbeatService {
       console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
       this.heartbeatInFlight = false;
 
-      // Auth failure — don't treat as connection error, emit separate callback
+      // Auth failure handling
       if (res.status === 401) {
-        console.log('[BuildersHQ] Authentication failed (401)');
-        this.onAuthFailureCallback?.();
+        const hadToken = Boolean(this.getAccessToken?.());
+        if (hadToken) {
+          // Token was sent but rejected — try to refresh/re-exchange
+          console.log('[BuildersHQ] Authentication failed (401) — token rejected');
+          this.onAuthFailureCallback?.();
+        } else {
+          // No token was sent (anonymous mode) — the server doesn't support
+          // anonymous heartbeats.  Treat as a soft failure: mark disconnected
+          // so the status bar shows the issue, but don't trigger auth recovery.
+          console.log('[BuildersHQ] Anonymous heartbeat rejected (401) — server requires auth');
+        }
         return;
       }
 

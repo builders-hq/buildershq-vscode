@@ -22,6 +22,16 @@ A VS Code extension that tracks developer presence and sends heartbeats to a Bui
 - Payload includes status, reason, workspace identity, machine identity, sequencing, focus, and optional `activities[]`.
 - Retries use exponential backoff: `1s, 2s, 5s, 10s, 30s`.
 
+### Delayed identification (anonymous mode)
+
+- Tracking starts immediately on activation, even without GitHub login.
+- Anonymous heartbeats are sent with `computerName` as the machine identifier and no `Authorization` header.
+- The server can accept these and key them by `computerName`.
+- A non-blocking notification suggests the user can log in with GitHub to claim their events.
+- When the user later logs in (from VS Code or the BuildersHQ website on the same machine), the server retroactively associates all prior anonymous events from that `computerName` with the authenticated GitHub identity.
+- The status bar shows `Active $(link)` with a tooltip prompting login while in anonymous mode.
+- If the server rejects anonymous heartbeats (401 without a token), the extension stays running and shows "Not Connected" — it does not aggressively prompt for login.
+
 ### Status transitions
 
 - `active`: recent edit/save/focus/editor activity.
