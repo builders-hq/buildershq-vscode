@@ -22,6 +22,7 @@ export interface ClaudeActivityEvent {
   command: string | null;
   summary: string;
   promptPreview?: string;
+  prompt?: string;
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
@@ -144,6 +145,7 @@ function processUserRecord(
     if (!rawText || rawText.trim().length === 0) { continue; }
 
     const preview = rawText.length > 150 ? rawText.slice(0, 150) + '...' : rawText;
+    const fullPrompt = rawText.length > 4096 ? rawText.slice(0, 4096) : rawText;
 
     console.log(`[BuildersHQ:Claude] prompting event — slug=${record.slug} branch=${record.gitBranch} preview="${preview}"`);
 
@@ -156,6 +158,7 @@ function processUserRecord(
       command: null,
       summary: 'Prompting Claude',
       promptPreview: preview,
+      prompt: fullPrompt,
       gitBranch: truncate(record.gitBranch as string, 256) ?? undefined,
       slug: truncate(record.slug as string, 256) ?? undefined,
       isSidechain: typeof record.isSidechain === 'boolean' ? record.isSidechain : undefined,
@@ -261,10 +264,7 @@ export class ClaudeCodeWatcher implements vscode.Disposable {
     }
 
     const activeFiles = await this.findActiveJsonlFiles(dir);
-    if (activeFiles.length === 0) {
-      console.log(`[BuildersHQ:Claude] No active JSONL files found in ${dir}, will retry in 30s`);
-      return;
-    }
+    if (activeFiles.length === 0) { return; }
 
     for (const filePath of activeFiles) {
       if (!this.trackedFiles.has(filePath)) {

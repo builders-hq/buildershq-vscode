@@ -142,7 +142,7 @@ export class OpencodeSessionWatcher implements vscode.Disposable {
         await this.scanProjectSessions(storageDir, sessionDir, projectDir.name);
       }
     } catch {
-      console.log(`[BuildersHQ:Opencode] No sessions directory found at ${sessionDir}, will retry in 30s`);
+      // silent retry — tool not installed
     }
   }
 
@@ -299,6 +299,7 @@ export class OpencodeSessionWatcher implements vscode.Disposable {
         // Extract prompt preview from content
         const contentArr = msg.content;
         let preview: string | undefined;
+        let fullPrompt: string | undefined;
         if (Array.isArray(contentArr)) {
           for (const block of contentArr) {
             const b = asObject(block);
@@ -306,12 +307,14 @@ export class OpencodeSessionWatcher implements vscode.Disposable {
               const text = (b.text as string).trim();
               if (text.length > 0) {
                 preview = text.length > 150 ? text.slice(0, 150) + '...' : text;
+                fullPrompt = text.length > 4096 ? text.slice(0, 4096) : text;
                 break;
               }
             }
           }
         } else if (typeof contentArr === 'string' && contentArr.trim().length > 0) {
           preview = contentArr.length > 150 ? contentArr.slice(0, 150) + '...' : contentArr;
+          fullPrompt = contentArr.length > 4096 ? contentArr.slice(0, 4096) : contentArr;
         }
 
         this.enqueueEvent({
@@ -323,6 +326,7 @@ export class OpencodeSessionWatcher implements vscode.Disposable {
           command: null,
           summary: 'Prompting Opencode',
           promptPreview: preview,
+          prompt: fullPrompt,
           aiModel,
           inputTokens,
           outputTokens,

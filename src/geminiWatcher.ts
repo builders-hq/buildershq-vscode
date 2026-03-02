@@ -165,9 +165,7 @@ export class GeminiSessionWatcher implements vscode.Disposable {
 
     const activeFiles = await this.findActiveJsonFiles(dir);
 
-    if (activeFiles.length === 0) {
-      console.log(`[BuildersHQ:Gemini] No active session files found in ${dir}, will retry in 30s`);
-    }
+    if (activeFiles.length === 0) { return; }
 
     for (const filePath of activeFiles) {
       if (!this.trackedSessions.has(filePath)) {
@@ -311,6 +309,7 @@ export class GeminiSessionWatcher implements vscode.Disposable {
           if (typeof p.text === 'string' && (p.text as string).trim().length > 0) {
             const text = (p.text as string).trim();
             const preview = text.length > 150 ? text.slice(0, 150) + '...' : text;
+            const fullPrompt = text.length > 4096 ? text.slice(0, 4096) : text;
             this.enqueueEvent({
               timestamp,
               claudeSessionId: tracked.sessionId,
@@ -320,6 +319,7 @@ export class GeminiSessionWatcher implements vscode.Disposable {
               command: null,
               summary: 'Prompting Gemini',
               promptPreview: preview,
+              prompt: fullPrompt,
             });
             break; // One prompt event per user turn
           }

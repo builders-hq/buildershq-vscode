@@ -47,6 +47,7 @@ interface ActivityBlock {
   command: string | null;
   summary: string;
   promptPreview?: string;
+  prompt?: string;
   source: string;
   gitBranch?: string;
   slug?: string;
@@ -230,6 +231,7 @@ export class HeartbeatService {
       command: event.command,
       summary: event.summary,
       ...(event.promptPreview && { promptPreview: event.promptPreview }),
+      ...(event.prompt && { prompt: event.prompt }),
       source,
       ...(event.gitBranch && { gitBranch: event.gitBranch }),
       ...(event.slug && { slug: event.slug }),

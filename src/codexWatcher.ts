@@ -285,10 +285,7 @@ export class CodexSessionWatcher implements vscode.Disposable {
     const dir = this.resolveSessionsDir();
     const activeFiles = await this.findActiveJsonlFiles(dir);
 
-    if (activeFiles.length === 0) {
-      console.log(`[BuildersHQ:Codex] No active JSONL files found in ${dir}, will retry in 30s`);
-      return;
-    }
+    if (activeFiles.length === 0) { return; }
 
     for (const filePath of activeFiles) {
       if (!this.trackedFiles.has(filePath)) {

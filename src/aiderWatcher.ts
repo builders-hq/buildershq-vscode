@@ -101,7 +101,7 @@ export class AiderWatcher implements vscode.Disposable {
       await fs.promises.access(filePath, fs.constants.R_OK);
       await this.attachToFile(filePath);
     } catch {
-      console.log(`[BuildersHQ:Aider] No chat history found at ${filePath}, will retry in 30s`);
+      // silent retry — file not present yet
     }
   }
 
@@ -279,6 +279,7 @@ export class AiderWatcher implements vscode.Disposable {
 
       // Regular user prompt
       const preview = userInput.length > 150 ? userInput.slice(0, 150) + '...' : userInput;
+      const fullPrompt = userInput.length > 4096 ? userInput.slice(0, 4096) : userInput;
       this.enqueueEvent({
         timestamp: Date.now(),
         claudeSessionId: this.currentSessionId,
@@ -288,6 +289,7 @@ export class AiderWatcher implements vscode.Disposable {
         command: null,
         summary: 'Prompting Aider',
         promptPreview: preview,
+        prompt: fullPrompt,
       });
       return;
     }
