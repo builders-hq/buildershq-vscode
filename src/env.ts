@@ -29,17 +29,19 @@ function resolveEnvPath(configuredPath: string): string {
   return path.resolve(configuredPath);
 }
 
-export function loadRuntimeConfig(): RuntimeConfig {
+export function loadRuntimeConfig(devMode = false): RuntimeConfig {
   const config = vscode.workspace.getConfiguration('buildershq');
   const configuredPath = config.get<string>(ENV_CONFIG_KEY, DEFAULT_ENV_PATH);
   const envPath = resolveEnvPath(configuredPath);
 
   let parsed: Record<string, string> = {};
-  try {
-    const raw = fs.readFileSync(envPath, 'utf8');
-    parsed = parse(raw);
-  } catch {
-    parsed = {};
+  if (devMode) {
+    try {
+      const raw = fs.readFileSync(envPath, 'utf8');
+      parsed = parse(raw);
+    } catch {
+      parsed = {};
+    }
   }
 
   return {

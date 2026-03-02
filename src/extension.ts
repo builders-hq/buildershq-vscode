@@ -31,7 +31,8 @@ let serverBaseUrl = '';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const sessionId = randomUUID();
-  const runtimeConfigProvider = () => loadRuntimeConfig();
+  const isDev = context.extensionMode !== vscode.ExtensionMode.Production;
+  const runtimeConfigProvider = () => loadRuntimeConfig(isDev);
 
   mongoStore = new MongoStore(runtimeConfigProvider);
   githubAuthService = new GitHubAuthService(context, runtimeConfigProvider, mongoStore);
@@ -39,7 +40,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   presenceTracker = new PresenceTracker();
   const cfg = vscode.workspace.getConfiguration('buildershq');
-  const runtimeCfg = loadRuntimeConfig();
+  const runtimeCfg = loadRuntimeConfig(isDev);
   console.log(`[BuildersHQ] Runtime config: envPath=${runtimeCfg.envPath}, presenceServerUrl=${runtimeCfg.presenceServerUrl || '(empty)'}`);
   const endpointUrl = runtimeCfg.presenceServerUrl ||
     cfg.get<string>('serverUrl', 'https://buildershq.net/api/presence');
@@ -284,7 +285,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Re-apply endpoint URL if serverUrl changed
       if (e.affectsConfiguration('buildershq.serverUrl')) {
         const newCfg = vscode.workspace.getConfiguration('buildershq');
-        const newRuntime = loadRuntimeConfig();
+        const newRuntime = loadRuntimeConfig(isDev);
         heartbeatService!.setEndpointUrl(
           newRuntime.presenceServerUrl ||
           newCfg.get<string>('serverUrl', 'https://buildershq.net/api/presence')
