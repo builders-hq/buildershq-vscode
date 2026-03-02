@@ -7,6 +7,9 @@ import { HeartbeatService, HeartbeatUser } from './heartbeat';
 import { StatusBarManager } from './statusBar';
 import { ClaudeCodeWatcher } from './claudeWatcher';
 import { CodexSessionWatcher } from './codexWatcher';
+import { OpencodeSessionWatcher } from './opencodeWatcher';
+import { GeminiSessionWatcher } from './geminiWatcher';
+import { AiderWatcher } from './aiderWatcher';
 import { GitCommitWatcher } from './gitWatcher';
 import { RoomWatcher } from './roomWatcher';
 import { playSound } from './soundPlayer';
@@ -22,6 +25,9 @@ let heartbeatService: HeartbeatService | undefined;
 let statusBarManager: StatusBarManager | undefined;
 let claudeWatcher: ClaudeCodeWatcher | undefined;
 let codexWatcher: CodexSessionWatcher | undefined;
+let opencodeWatcher: OpencodeSessionWatcher | undefined;
+let geminiWatcher: GeminiSessionWatcher | undefined;
+let aiderWatcher: AiderWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
 let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
@@ -181,6 +187,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     heartbeatService!.stop();
     claudeWatcher?.stop();
     codexWatcher?.stop();
+    opencodeWatcher?.stop();
+    geminiWatcher?.stop();
+    aiderWatcher?.stop();
     gitWatcher?.stop();
     roomWatcher?.stop();
     updateStatusBar(context);
@@ -196,6 +205,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       if (codexWatcher) {
         codexWatcher.start();
+      }
+      if (opencodeWatcher) {
+        opencodeWatcher.start();
+      }
+      if (geminiWatcher) {
+        geminiWatcher.start();
+      }
+      if (aiderWatcher) {
+        aiderWatcher.start();
       }
       if (gitWatcher) {
         gitWatcher.start();
@@ -325,6 +343,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         handleCodexConfigChange(context);
       }
 
+      // Handle Opencode enabled/disabled toggle
+      if (e.affectsConfiguration('buildershq.opencode')) {
+        handleOpencodeConfigChange(context);
+      }
+
+      // Handle Gemini CLI enabled/disabled toggle
+      if (e.affectsConfiguration('buildershq.gemini')) {
+        handleGeminiConfigChange(context);
+      }
+
+      // Handle Aider enabled/disabled toggle
+      if (e.affectsConfiguration('buildershq.aider')) {
+        handleAiderConfigChange(context);
+      }
+
       // Handle git commits enabled/disabled toggle
       if (e.affectsConfiguration('buildershq.gitCommits')) {
         handleGitCommitsConfigChange(context);
@@ -400,6 +433,15 @@ function startTracking(context: vscode.ExtensionContext): void {
   // OpenAI Codex activity tracking
   initCodexTracking(context, isPaused);
 
+  // Opencode activity tracking
+  initOpencodeTracking(context, isPaused);
+
+  // Gemini CLI activity tracking
+  initGeminiTracking(context, isPaused);
+
+  // Aider activity tracking
+  initAiderTracking(context, isPaused);
+
   // Git commit activity tracking
   initGitCommitTracking(context, isPaused);
 
@@ -417,6 +459,9 @@ function stopTracking(): void {
   heartbeatService?.stop();
   claudeWatcher?.stop();
   codexWatcher?.stop();
+  opencodeWatcher?.stop();
+  geminiWatcher?.stop();
+  aiderWatcher?.stop();
   gitWatcher?.stop();
   roomWatcher?.stop();
 }
@@ -571,6 +616,153 @@ function handleCodexConfigChange(
   updateStatusBar(context);
 }
 
+function initOpencodeTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  if (!config.get<boolean>('opencode.enabled', true)) {
+    return;
+  }
+
+  opencodeWatcher = new OpencodeSessionWatcher();
+
+  opencodeWatcher.onActivityBatch((events) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    for (const event of events) {
+      heartbeatService!.setActivity(event, 'opencode');
+    }
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    opencodeWatcher.start();
+  }
+
+  context.subscriptions.push(opencodeWatcher);
+}
+
+function handleOpencodeConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  const enabled = config.get<boolean>('opencode.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !opencodeWatcher) {
+    initOpencodeTracking(context, isPaused);
+  } else if (!enabled && opencodeWatcher) {
+    opencodeWatcher.dispose();
+    opencodeWatcher = undefined;
+  } else if (enabled && opencodeWatcher) {
+    opencodeWatcher.stop();
+    if (!isPaused) {
+      opencodeWatcher.start();
+    }
+  }
+
+  updateStatusBar(context);
+}
+
+function initGeminiTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  if (!config.get<boolean>('gemini.enabled', true)) {
+    return;
+  }
+
+  geminiWatcher = new GeminiSessionWatcher();
+
+  geminiWatcher.onActivityBatch((events) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    for (const event of events) {
+      heartbeatService!.setActivity(event, 'gemini');
+    }
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    geminiWatcher.start();
+  }
+
+  context.subscriptions.push(geminiWatcher);
+}
+
+function handleGeminiConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  const enabled = config.get<boolean>('gemini.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !geminiWatcher) {
+    initGeminiTracking(context, isPaused);
+  } else if (!enabled && geminiWatcher) {
+    geminiWatcher.dispose();
+    geminiWatcher = undefined;
+  } else if (enabled && geminiWatcher) {
+    geminiWatcher.stop();
+    if (!isPaused) {
+      geminiWatcher.start();
+    }
+  }
+
+  updateStatusBar(context);
+}
+
+function initAiderTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  if (!config.get<boolean>('aider.enabled', true)) {
+    return;
+  }
+
+  aiderWatcher = new AiderWatcher();
+
+  aiderWatcher.onActivityBatch((events) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    for (const event of events) {
+      heartbeatService!.setActivity(event, 'aider');
+    }
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    aiderWatcher.start();
+  }
+
+  context.subscriptions.push(aiderWatcher);
+}
+
+function handleAiderConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  const enabled = config.get<boolean>('aider.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !aiderWatcher) {
+    initAiderTracking(context, isPaused);
+  } else if (!enabled && aiderWatcher) {
+    aiderWatcher.dispose();
+    aiderWatcher = undefined;
+  } else if (enabled && aiderWatcher) {
+    aiderWatcher.stop();
+    if (!isPaused) {
+      aiderWatcher.start();
+    }
+  }
+
+  updateStatusBar(context);
+}
+
 function initGitCommitTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
@@ -646,7 +838,10 @@ function updateStatusBar(context: vscode.ExtensionContext): void {
   const authenticated = githubAuthService?.isFullyAuthenticated() ?? false;
   const claudeActive = claudeWatcher?.isWatching() ?? false;
   const codexActive = codexWatcher?.isWatching() ?? false;
-  statusBarManager.update(status, paused, connected, authenticated, trackingStarted, claudeActive, codexActive);
+  const opencodeActive = opencodeWatcher?.isWatching() ?? false;
+  const geminiActive = geminiWatcher?.isWatching() ?? false;
+  const aiderActive = aiderWatcher?.isWatching() ?? false;
+  statusBarManager.update(status, paused, connected, authenticated, trackingStarted, claudeActive, codexActive, opencodeActive, geminiActive, aiderActive);
 }
 
 export async function deactivate(): Promise<void> {
@@ -658,6 +853,9 @@ export async function deactivate(): Promise<void> {
   githubAuthService?.dispose();
   claudeWatcher?.dispose();
   codexWatcher?.dispose();
+  opencodeWatcher?.dispose();
+  geminiWatcher?.dispose();
+  aiderWatcher?.dispose();
   gitWatcher?.dispose();
   roomWatcher?.dispose();
   presenceTracker = undefined;
@@ -665,6 +863,9 @@ export async function deactivate(): Promise<void> {
   statusBarManager = undefined;
   claudeWatcher = undefined;
   codexWatcher = undefined;
+  opencodeWatcher = undefined;
+  geminiWatcher = undefined;
+  aiderWatcher = undefined;
   gitWatcher = undefined;
   githubAuthService = undefined;
   mongoStore = undefined;

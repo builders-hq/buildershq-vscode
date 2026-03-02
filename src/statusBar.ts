@@ -44,6 +44,9 @@ export class StatusBarManager implements vscode.Disposable {
     tracking: boolean,
     claudeActive?: boolean,
     codexActive?: boolean,
+    opencodeActive?: boolean,
+    geminiActive?: boolean,
+    aiderActive?: boolean,
   ): void {
     let displayKey: DisplayKey;
 
@@ -69,7 +72,8 @@ export class StatusBarManager implements vscode.Disposable {
     this.statusBarItem.text = STATUS_LABELS[displayKey];
     this.statusBarItem.tooltip = STATUS_TOOLTIPS[displayKey];
 
-    if (!paused && (claudeActive || codexActive)) {
+    const anyAgentActive = claudeActive || codexActive || opencodeActive || geminiActive || aiderActive;
+    if (!paused && anyAgentActive) {
       this.statusBarItem.text += ' $(sparkle)';
       const activeLabels: string[] = [];
       if (claudeActive) {
@@ -77,6 +81,15 @@ export class StatusBarManager implements vscode.Disposable {
       }
       if (codexActive) {
         activeLabels.push('OpenAI Codex active');
+      }
+      if (opencodeActive) {
+        activeLabels.push('Opencode active');
+      }
+      if (geminiActive) {
+        activeLabels.push('Gemini CLI active');
+      }
+      if (aiderActive) {
+        activeLabels.push('Aider active');
       }
       this.statusBarItem.tooltip += ` | ${activeLabels.join(' + ')}`;
     }
