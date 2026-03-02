@@ -224,12 +224,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const loginCmd = vscode.commands.registerCommand('buildershq.loginWithGitHub', async () => {
-    console.log('[BuildersHQ] Login command invoked — trying browser flow');
+    console.log('[BuildersHQ] Login command invoked - trying VS Code auth first');
     try {
-      // Primary: browser-based login
-      const user = await githubAuthService!.loginViaBrowser(serverBaseUrl);
+      // Primary: VS Code built-in GitHub auth + device flow fallback
+      const user = await githubAuthService!.login();
       if (user) {
-        console.log(`[BuildersHQ] Browser login succeeded: ${user.githubLogin}`);
+        console.log(`[BuildersHQ] VS Code login succeeded: ${user.githubLogin}`);
         vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${user.githubLogin}`);
         // Tracking is already running — just ensure it's started and force a heartbeat
         // so the server immediately sees the identified user for this computerName.
@@ -239,21 +239,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      // Fallback: VS Code built-in GitHub auth + device flow
-      console.log('[BuildersHQ] Browser login timed out — falling back to VS Code auth');
-      const fallbackUser = await githubAuthService!.login();
+      // Fallback: browser-based login
+      console.log('[BuildersHQ] VS Code login did not complete - falling back to browser auth');
+      const fallbackUser = await githubAuthService!.loginViaBrowser(serverBaseUrl);
       if (fallbackUser) {
         console.log(`[BuildersHQ] Fallback login succeeded: ${fallbackUser.githubLogin}`);
         vscode.window.showInformationMessage(`BuildersHQ: Logged in as ${fallbackUser.githubLogin}`);
-        const exchanged = await githubAuthService!.exchangeForBuildersHQToken(serverBaseUrl);
-        if (exchanged) {
-          startTracking(context);
-          heartbeatService!.forceHeartbeat('activate');
-        } else {
-          vscode.window.showWarningMessage(
-            'BuildersHQ: Logged in to GitHub but could not connect to the BuildersHQ server.',
-          );
-        }
+        startTracking(context);
+        heartbeatService!.forceHeartbeat('activate');
       } else {
         console.log('[BuildersHQ] Fallback login also returned no user');
       }
@@ -815,7 +808,9 @@ function handleGitCommitsConfigChange(
 
 function getHeartbeatUser(): HeartbeatUser | undefined {
   const user = githubAuthService?.getUserProfile();
-  if (!user) {
+  // Skip placeholder profiles (githubUserId 0) created during browser-flow
+  // restore — the server requires a positive integer.
+  if (!user || !user.githubUserId) {
     return undefined;
   }
 

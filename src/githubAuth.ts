@@ -394,6 +394,10 @@ export class GitHubAuthService implements vscode.Disposable {
   async loginViaBrowser(serverBaseUrl: string): Promise<GitHubUserProfile | undefined> {
     const scheme = vscode.env.uriScheme;
     const loginUrl = `${serverBaseUrl}/api/auth/github/start-vscode?scheme=${encodeURIComponent(scheme)}`;
+    const browserLoginHealthy = await this.preflightBrowserLogin(loginUrl);
+    if (!browserLoginHealthy) {
+      return undefined;
+    }
 
     console.log(`[BuildersHQ Auth] loginViaBrowser() — opening ${loginUrl}`);
     await vscode.env.openExternal(vscode.Uri.parse(loginUrl));
@@ -413,6 +417,66 @@ export class GitHubAuthService implements vscode.Disposable {
 
       this.pendingBrowserLogin = { resolve, timeoutId };
     });
+  }
+
+  private async preflightBrowserLogin(loginUrl: string): Promise<boolean> {
+    try {
+      const response = await fetch(loginUrl, {
+        method: 'GET',
+        redirect: 'manual',
+      });
+
+      const location = response.headers.get('location');
+      if (!location) {
+        return true;
+      }
+
+      const redirectUrl = new URL(location, loginUrl);
+      const isGitHubAuthorize =
+        redirectUrl.origin === 'https://github.com' &&
+        redirectUrl.pathname === '/login/oauth/authorize';
+      if (!isGitHubAuthorize) {
+        return true;
+      }
+
+      const clientId = redirectUrl.searchParams.get('client_id')?.trim() ?? '';
+      const redirectUri = redirectUrl.searchParams.get('redirect_uri')?.trim() ?? '';
+      if (clientId && redirectUri) {
+        try {
+          const startUrl = new URL(loginUrl);
+          const callbackUrl = new URL(redirectUri);
+          const startIsLocal =
+            startUrl.hostname === 'localhost' ||
+            startUrl.hostname === '127.0.0.1';
+          const callbackIsLocal =
+            callbackUrl.hostname === 'localhost' ||
+            callbackUrl.hostname === '127.0.0.1';
+          if (!startIsLocal && callbackIsLocal) {
+            console.log(
+              `[BuildersHQ Auth] Browser login misconfigured: start=${startUrl.toString()} callback=${callbackUrl.toString()}`,
+            );
+            vscode.window.showErrorMessage(
+              'BuildersHQ browser login is misconfigured: production auth is redirecting to localhost callback.',
+            );
+            return false;
+          }
+        } catch {
+          // If URL parsing fails here, keep the existing behavior and continue.
+        }
+
+        return true;
+      }
+
+      console.log(`[BuildersHQ Auth] Browser login misconfigured: ${redirectUrl.toString()}`);
+      vscode.window.showErrorMessage(
+        'BuildersHQ browser login is misconfigured (missing GitHub client_id or redirect_uri).',
+      );
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`[BuildersHQ Auth] Browser login preflight failed (${message}) - continuing anyway`);
+      return true;
+    }
   }
 
   private async handleAuthCallback(uri: vscode.Uri, serverBaseUrl: string): Promise<void> {
