@@ -432,6 +432,12 @@ export class HeartbeatService {
       clearTimeout(timeout);
 
       console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Response: ${res.status}`);
+      if (res.status >= 400 && res.status < 500) {
+        try {
+          const body = await res.text();
+          console.log(`[BuildersHQ] Response body: ${body}`);
+        } catch { /* ignore read errors */ }
+      }
       this.heartbeatInFlight = false;
 
       // Auth failure handling
