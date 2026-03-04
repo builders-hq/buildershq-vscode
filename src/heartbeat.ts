@@ -396,13 +396,18 @@ export class HeartbeatService {
       this.lastSentActivities = Array.from(merged.values());
       this.lastActivityAt = Date.now();
       this.pendingActivities.clear();
-      payload.activities = this.lastSentActivities;
     } else if (
       this.lastSentActivities.length > 0 &&
       Date.now() - this.lastActivityAt >= HeartbeatService.ACTIVITY_TTL_MS
     ) {
       // Expired — clear
       this.lastSentActivities = [];
+    }
+
+    // Always re-send activities on every heartbeat until they expire,
+    // so the server's putAll doesn't overwrite them with null.
+    if (this.lastSentActivities.length > 0) {
+      payload.activities = this.lastSentActivities;
     }
 
     const activityInfo = payload.activities ? ` activities=${payload.activities.length}` : '';
