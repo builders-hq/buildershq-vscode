@@ -23,6 +23,7 @@ export interface ClaudeActivityEvent {
   summary: string;
   promptPreview?: string;
   prompt?: string;
+  promptSummary?: string;
   gitBranch?: string;
   slug?: string;
   isSidechain?: boolean;
