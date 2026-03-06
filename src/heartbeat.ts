@@ -471,11 +471,12 @@ export class HeartbeatService {
         this.currentBackoffIndex = 0;
         this.cancelRetry();
 
-        // Check for reverse-identification claim token in the response.
-        // Only parse the body when anonymous (no access token) to avoid
-        // needless JSON parsing on every authenticated heartbeat.
         if (!this.getAccessToken?.() && this.onClaimTokenCallback) {
+          // Anonymous mode: check for reverse-identification claim token
           await this.tryReadClaimToken(res);
+        } else if (this.getAccessToken?.()) {
+          // Authenticated: check for auto-joined room notifications
+          await this.tryReadAutoJoinedRooms(res);
         }
       } else {
         this.scheduleRetry();
@@ -556,6 +557,34 @@ export class HeartbeatService {
     } catch {
       // Response body was not valid JSON or empty — normal for most
       // heartbeat responses.  Silently ignore.
+    }
+  }
+
+  /**
+   * Check heartbeat response for autoJoinedRooms notifications.
+   * When the server auto-assigns a user to private rooms (based on repoUrl/org matching),
+   * it includes the room info in the response so we can notify the user.
+   */
+  private async tryReadAutoJoinedRooms(res: Response): Promise<void> {
+    try {
+      const body = await res.json() as Record<string, unknown>;
+      if (\!body || typeof body \!== 'object' || \!Array.isArray(body.autoJoinedRooms)) {
+        return;
+      }
+      const rooms = body.autoJoinedRooms as Array<{ slug?: string; name?: string }>;
+      for (const room of rooms) {
+        if (typeof room.name === 'string' && typeof room.slug === 'string') {
+          const action = await vscode.window.showInformationMessage(
+            `[BuildersHQ] You've been added to room '${room.name}'`,
+            'View Room',
+          );
+          if (action === 'View Room') {
+            vscode.env.openExternal(vscode.Uri.parse(`https://buildershq.net/rooms/${room.slug}`));
+          }
+        }
+      }
+    } catch {
+      // Response body already consumed or not JSON — silently ignore
     }
   }
 
