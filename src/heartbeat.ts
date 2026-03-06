@@ -48,6 +48,7 @@ interface ActivityBlock {
   summary: string;
   promptPreview?: string;
   prompt?: string;
+  promptSummary?: string;
   source: string;
   gitBranch?: string;
   slug?: string;
@@ -221,6 +222,14 @@ export class HeartbeatService {
   setActivity(event: ClaudeActivityEvent, source: string = 'claude_code'): void {
     this.activitySeq += 1;
     this.lastActivityAt = Date.now();
+
+    // Carry forward prompt from previous activity for same session so it
+    // persists across activity-type transitions (prompting → thinking → editing).
+    const existing = this.pendingActivities.get(event.claudeSessionId)
+      ?? this.lastSentActivities.find(a => a.claudeSessionId === event.claudeSessionId);
+    const carryPromptPreview = event.promptPreview || existing?.promptPreview;
+    const carryPrompt = event.prompt || existing?.prompt;
+
     this.pendingActivities.set(event.claudeSessionId, {
       claudeSessionId: event.claudeSessionId,
       seq: this.activitySeq,
@@ -230,8 +239,8 @@ export class HeartbeatService {
       filePath: event.filePath,
       command: event.command,
       summary: event.summary,
-      ...(event.promptPreview && { promptPreview: event.promptPreview }),
-      ...(event.prompt && { prompt: event.prompt }),
+      ...(carryPromptPreview && { promptPreview: carryPromptPreview }),
+      ...(carryPrompt && { prompt: carryPrompt }),
       source,
       ...(event.gitBranch && { gitBranch: event.gitBranch }),
       ...(event.slug && { slug: event.slug }),
