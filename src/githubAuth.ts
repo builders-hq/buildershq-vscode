@@ -6,9 +6,9 @@ const ACCESS_TOKEN_SECRET_KEY = 'buildershq.github.accessToken';
 const BUILDERSHQ_ACCESS_TOKEN_KEY = 'buildershq.api.accessToken';
 const BUILDERSHQ_REFRESH_TOKEN_KEY = 'buildershq.api.refreshToken';
 const MACHINE_TOKEN_KEY = 'buildershq.machineToken';
-const LOGIN_SCOPES = 'read:user user:email';
+const LOGIN_SCOPES = 'read:user user:email read:org';
 const VSCODE_GITHUB_PROVIDER = 'github';
-const VSCODE_GITHUB_SCOPES = ['read:user', 'user:email'];
+const VSCODE_GITHUB_SCOPES = ['read:user', 'user:email', 'read:org'];
 
 type DeviceCodeResponse = {
   device_code: string;
