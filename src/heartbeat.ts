@@ -138,6 +138,8 @@ export class HeartbeatService {
   private currentTaskName: string | null = null;
 
   private static readonly ACTIVITY_TTL_MS = 600_000; // 10 minutes
+  private static readonly AWAY_SUSPEND_MS = 2 * 60 * 60 * 1000; // 2 hours — stop heartbeats after extended away
+  private awayStartedAt: number = 0;
 
   // Network reliability
   private heartbeatInFlight: boolean = false;
@@ -185,8 +187,15 @@ export class HeartbeatService {
     _oldStatus: PresenceStatus,
     reason: ActivityReason
   ): void {
+    const wasAway = this.currentStatus === 'away';
     this.currentStatus = newStatus;
     this.currentReason = reason;
+
+    if (newStatus === 'away' && !wasAway) {
+      this.awayStartedAt = Date.now();
+    } else if (newStatus !== 'away') {
+      this.awayStartedAt = 0;
+    }
 
     this.awaySent = false;
     this.sendHeartbeat();
@@ -338,6 +347,20 @@ export class HeartbeatService {
 
   private sendHeartbeat(): void {
     if (this.heartbeatInFlight) {
+      return;
+    }
+
+    // Stop sending heartbeats after extended away periods to prevent
+    // stale repos from showing up in the presence system for days.
+    if (
+      this.currentStatus === 'away' &&
+      this.awayStartedAt > 0 &&
+      Date.now() - this.awayStartedAt >= HeartbeatService.AWAY_SUSPEND_MS
+    ) {
+      if (!this.awaySent) {
+        console.log('[BuildersHQ] Extended away — suspending heartbeats (will resume on activity)');
+        this.awaySent = true;
+      }
       return;
     }
 
