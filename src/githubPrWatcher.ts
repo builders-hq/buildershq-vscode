@@ -3,7 +3,7 @@ import { getRepoName } from './workspace';
 
 export interface GitHubPrEvent {
   timestamp: number;
-  eventType: 'pr_opened' | 'pr_merged';
+  eventType: 'pr_opened' | 'pr_merged' | 'pr_closed';
   prNumber: number;
   prTitle: string;
   prUrl: string;
@@ -169,6 +169,17 @@ export class GitHubPrWatcher implements vscode.Disposable {
         this.emitEvent({
           timestamp: Date.now(),
           eventType: 'pr_merged',
+          prNumber: pr.number,
+          prTitle: pr.title.slice(0, 200),
+          prUrl: pr.html_url,
+          branch: pr.head?.ref ?? null,
+          repoFullName,
+        });
+      } else if (prev.state === 'open' && pr.state === 'closed' && !pr.merged_at) {
+        // PR was closed without being merged
+        this.emitEvent({
+          timestamp: Date.now(),
+          eventType: 'pr_closed',
           prNumber: pr.number,
           prTitle: pr.title.slice(0, 200),
           prUrl: pr.html_url,

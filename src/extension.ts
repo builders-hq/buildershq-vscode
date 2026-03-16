@@ -12,6 +12,7 @@ import { GeminiSessionWatcher } from './geminiWatcher';
 import { AiderWatcher } from './aiderWatcher';
 import { GitCommitWatcher } from './gitWatcher';
 import { GitHubPrWatcher } from './githubPrWatcher';
+import { GitBranchWatcher } from './gitBranchWatcher';
 import { RoomWatcher } from './roomWatcher';
 import { playSound } from './soundPlayer';
 import { loadRuntimeConfig } from './env';
@@ -31,6 +32,7 @@ let geminiWatcher: GeminiSessionWatcher | undefined;
 let aiderWatcher: AiderWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
 let githubPrWatcher: GitHubPrWatcher | undefined;
+let gitBranchWatcher: GitBranchWatcher | undefined;
 let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
 let roomWatcher: RoomWatcher | undefined;
@@ -193,6 +195,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     geminiWatcher?.stop();
     aiderWatcher?.stop();
     gitWatcher?.stop();
+    gitBranchWatcher?.stop();
     githubPrWatcher?.stop();
     roomWatcher?.stop();
     updateStatusBar(context);
@@ -220,6 +223,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       if (gitWatcher) {
         gitWatcher.start();
+      }
+      if (gitBranchWatcher) {
+        gitBranchWatcher.start();
       }
       if (githubPrWatcher) {
         githubPrWatcher.start();
@@ -449,6 +455,9 @@ function startTracking(context: vscode.ExtensionContext): void {
   // Git commit activity tracking
   initGitCommitTracking(context, isPaused);
 
+  // Git branch activity tracking
+  initGitBranchTracking(context, isPaused);
+
   // GitHub PR activity tracking
   initGithubPrTracking(context, isPaused);
 
@@ -470,6 +479,7 @@ function stopTracking(): void {
   geminiWatcher?.stop();
   aiderWatcher?.stop();
   gitWatcher?.stop();
+  gitBranchWatcher?.stop();
   githubPrWatcher?.stop();
   roomWatcher?.stop();
 }
@@ -821,6 +831,41 @@ function handleGitCommitsConfigChange(
   }
 }
 
+function initGitBranchTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  if (!config.get<boolean>('gitCommits.enabled', true)) {
+    return;
+  }
+
+  gitBranchWatcher = new GitBranchWatcher();
+
+  gitBranchWatcher.onBranchEvent((event) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    const label = event.eventType === 'branch_created' ? 'Created branch' : 'Deleted branch';
+    heartbeatService!.setActivity({
+      timestamp: event.timestamp,
+      claudeSessionId: `git:branch:${event.branchName}`,
+      activityType: event.eventType,
+      tool: null,
+      filePath: null,
+      command: null,
+      summary: `${label}: ${event.branchName}`,
+      gitBranch: event.branchName,
+    }, 'git');
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    gitBranchWatcher.start();
+  }
+
+  context.subscriptions.push(gitBranchWatcher);
+}
+
 function initGithubPrTracking(
   context: vscode.ExtensionContext,
   isPaused: boolean,
@@ -836,7 +881,8 @@ function initGithubPrTracking(
 
   githubPrWatcher.onPrEvent((event) => {
     if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
-    const label = event.eventType === 'pr_opened' ? 'Opened' : 'Merged';
+    const labelMap: Record<string, string> = { pr_opened: 'Opened', pr_merged: 'Merged', pr_closed: 'Closed' };
+    const label = labelMap[event.eventType] ?? event.eventType;
     heartbeatService!.setActivity({
       timestamp: event.timestamp,
       claudeSessionId: `github:pr:${event.prNumber}`,
@@ -919,6 +965,7 @@ export async function deactivate(): Promise<void> {
   geminiWatcher?.dispose();
   aiderWatcher?.dispose();
   gitWatcher?.dispose();
+  gitBranchWatcher?.dispose();
   githubPrWatcher?.dispose();
   roomWatcher?.dispose();
   presenceTracker = undefined;
@@ -930,6 +977,7 @@ export async function deactivate(): Promise<void> {
   geminiWatcher = undefined;
   aiderWatcher = undefined;
   gitWatcher = undefined;
+  gitBranchWatcher = undefined;
   githubPrWatcher = undefined;
   githubAuthService = undefined;
   mongoStore = undefined;

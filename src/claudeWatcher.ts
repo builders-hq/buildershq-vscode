@@ -11,7 +11,12 @@ export type ClaudeActivityType =
   | 'searching'
   | 'idle'
   | 'prompting'
-  | 'rate_limited';
+  | 'rate_limited'
+  | 'pr_opened'
+  | 'pr_merged'
+  | 'pr_closed'
+  | 'branch_created'
+  | 'branch_deleted';
 
 export interface ClaudeActivityEvent {
   timestamp: number;
