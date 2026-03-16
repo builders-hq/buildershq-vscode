@@ -120,6 +120,17 @@ Two mechanisms allow the user to identify from the BuildersHQ website:
 - Sends activity source `"git"` with summary `Committed: {subject}`.
 - Enabled by default (`buildershq.gitCommits.enabled`).
 
+### GitHub PR tracking
+
+- Polls GitHub REST API every 60s for recent PRs (`/repos/{owner}/{repo}/pulls?state=all&sort=updated`).
+- Uses the raw GitHub access token from `GitHubAuthService.getGitHubAccessToken()`.
+- Uses conditional requests (`If-None-Match` / ETag) to minimize rate limit consumption.
+- Seeds current PR state on startup to avoid false events on activation.
+- Detects `pr_opened` (new PR not previously seen) and `pr_merged` (PR gained `merged_at`).
+- Sends activity with `source: "github"`, `activityType: "pr_opened" | "pr_merged"`, `claudeSessionId: "github:pr:{number}"`.
+- The server's heartbeat handler converts these into room events (`pr_opened` / `pr_merged`).
+- Enabled by default (`buildershq.githubPr.enabled`).
+
 ## Project Structure
 
 ```text
@@ -134,6 +145,7 @@ src/
 |- geminiWatcher.ts     # Gemini CLI sessions watcher/parser
 |- aiderWatcher.ts      # Aider chat history watcher/parser
 |- gitWatcher.ts        # Git refs watcher
+|- githubPrWatcher.ts   # GitHub PR polling (opened/merged detection)
 `- statusBar.ts         # Status bar UI state
 ```
 
