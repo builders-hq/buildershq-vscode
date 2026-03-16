@@ -98,6 +98,11 @@
           "default": true,
           "description": "Track git commits as developer activity."
         },
+        "buildershq.githubPr.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track GitHub pull request events (opened/merged) via the GitHub API."
+        },
         "buildershq.claudeCode.enabled": {
           "type": "boolean",
           "default": true,
