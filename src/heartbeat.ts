@@ -600,7 +600,7 @@ export class HeartbeatService {
   private async tryReadAutoJoinedRooms(res: Response): Promise<void> {
     try {
       const body = await res.json() as Record<string, unknown>;
-      if (\!body || typeof body \!== 'object' || \!Array.isArray(body.autoJoinedRooms)) {
+      if (!body || typeof body !== 'object' || !Array.isArray(body.autoJoinedRooms)) {
         return;
       }
       const rooms = body.autoJoinedRooms as Array<{ slug?: string; name?: string }>;
