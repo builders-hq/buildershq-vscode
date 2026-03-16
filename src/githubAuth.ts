@@ -114,6 +114,11 @@ export class GitHubAuthService implements vscode.Disposable {
     return this.buildershqAccessToken;
   }
 
+  /** Returns the raw GitHub access token for API calls (e.g., PR polling). */
+  getGitHubAccessToken(): string | undefined {
+    return this.authState?.accessToken || undefined;
+  }
+
   isFullyAuthenticated(): boolean {
     return Boolean(this.authState) && Boolean(this.buildershqAccessToken);
   }

@@ -11,6 +11,7 @@ import { OpencodeSessionWatcher } from './opencodeWatcher';
 import { GeminiSessionWatcher } from './geminiWatcher';
 import { AiderWatcher } from './aiderWatcher';
 import { GitCommitWatcher } from './gitWatcher';
+import { GitHubPrWatcher } from './githubPrWatcher';
 import { RoomWatcher } from './roomWatcher';
 import { playSound } from './soundPlayer';
 import { loadRuntimeConfig } from './env';
@@ -29,6 +30,7 @@ let opencodeWatcher: OpencodeSessionWatcher | undefined;
 let geminiWatcher: GeminiSessionWatcher | undefined;
 let aiderWatcher: AiderWatcher | undefined;
 let gitWatcher: GitCommitWatcher | undefined;
+let githubPrWatcher: GitHubPrWatcher | undefined;
 let mongoStore: MongoStore | undefined;
 let githubAuthService: GitHubAuthService | undefined;
 let roomWatcher: RoomWatcher | undefined;
@@ -191,6 +193,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     geminiWatcher?.stop();
     aiderWatcher?.stop();
     gitWatcher?.stop();
+    githubPrWatcher?.stop();
     roomWatcher?.stop();
     updateStatusBar(context);
   });
@@ -217,6 +220,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       if (gitWatcher) {
         gitWatcher.start();
+      }
+      if (githubPrWatcher) {
+        githubPrWatcher.start();
       }
       roomWatcher?.start();
     }
@@ -355,6 +361,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration('buildershq.gitCommits')) {
         handleGitCommitsConfigChange(context);
       }
+
+      // Handle GitHub PR tracking enabled/disabled toggle
+      if (e.affectsConfiguration('buildershq.githubPr')) {
+        handleGithubPrConfigChange(context);
+      }
     }
   });
 
@@ -438,6 +449,9 @@ function startTracking(context: vscode.ExtensionContext): void {
   // Git commit activity tracking
   initGitCommitTracking(context, isPaused);
 
+  // GitHub PR activity tracking
+  initGithubPrTracking(context, isPaused);
+
   updateStatusBar(context);
 }
 
@@ -456,6 +470,7 @@ function stopTracking(): void {
   geminiWatcher?.stop();
   aiderWatcher?.stop();
   gitWatcher?.stop();
+  githubPrWatcher?.stop();
   roomWatcher?.stop();
 }
 
@@ -806,6 +821,58 @@ function handleGitCommitsConfigChange(
   }
 }
 
+function initGithubPrTracking(
+  context: vscode.ExtensionContext,
+  isPaused: boolean,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  if (!config.get<boolean>('githubPr.enabled', true)) {
+    return;
+  }
+
+  githubPrWatcher = new GitHubPrWatcher(
+    () => githubAuthService?.getGitHubAccessToken(),
+  );
+
+  githubPrWatcher.onPrEvent((event) => {
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    const label = event.eventType === 'pr_opened' ? 'Opened' : 'Merged';
+    heartbeatService!.setActivity({
+      timestamp: event.timestamp,
+      claudeSessionId: `github:pr:${event.prNumber}`,
+      activityType: event.eventType,
+      tool: null,
+      filePath: null,
+      command: null,
+      summary: `${label} PR #${event.prNumber}: ${event.prTitle}`,
+      gitBranch: event.branch ?? undefined,
+    }, 'github');
+    presenceTracker!.recordExternalActivity('task_start', false);
+    heartbeatService!.flushActivity();
+  });
+
+  if (!isPaused) {
+    githubPrWatcher.start();
+  }
+
+  context.subscriptions.push(githubPrWatcher);
+}
+
+function handleGithubPrConfigChange(
+  context: vscode.ExtensionContext,
+): void {
+  const config = vscode.workspace.getConfiguration('buildershq');
+  const enabled = config.get<boolean>('githubPr.enabled', true);
+  const isPaused = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+
+  if (enabled && !githubPrWatcher) {
+    initGithubPrTracking(context, isPaused);
+  } else if (!enabled && githubPrWatcher) {
+    githubPrWatcher.dispose();
+    githubPrWatcher = undefined;
+  }
+}
+
 function getHeartbeatUser(): HeartbeatUser | undefined {
   const user = githubAuthService?.getUserProfile();
   // Skip placeholder profiles (githubUserId 0) created during browser-flow
@@ -852,6 +919,7 @@ export async function deactivate(): Promise<void> {
   geminiWatcher?.dispose();
   aiderWatcher?.dispose();
   gitWatcher?.dispose();
+  githubPrWatcher?.dispose();
   roomWatcher?.dispose();
   presenceTracker = undefined;
   heartbeatService = undefined;
@@ -862,6 +930,7 @@ export async function deactivate(): Promise<void> {
   geminiWatcher = undefined;
   aiderWatcher = undefined;
   gitWatcher = undefined;
+  githubPrWatcher = undefined;
   githubAuthService = undefined;
   mongoStore = undefined;
   roomWatcher = undefined;
