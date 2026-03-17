@@ -886,9 +886,7 @@ function initGithubPrTracking(
     return;
   }
 
-  githubPrWatcher = new GitHubPrWatcher(
-    () => githubAuthService?.getGitHubAccessToken(),
-  );
+  githubPrWatcher = new GitHubPrWatcher();
 
   githubPrWatcher.onPrEvent((event) => {
     console.log(`[BuildersHQ][Extension] PR event callback fired: ${event.eventType} #${event.prNumber} "${event.prTitle}"`);

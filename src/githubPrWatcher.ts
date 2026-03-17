@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getRepoName } from './workspace';
+import { execFile } from 'child_process';
 
 export interface GitHubPrEvent {
   timestamp: number;
@@ -13,15 +13,14 @@ export interface GitHubPrEvent {
 
 export type GitHubPrCallback = (event: GitHubPrEvent) => void;
 
-type PrState = { state: string; mergedAt: string | null };
+type PrState = { state: 'open' | 'merged' | 'closed' };
 
-type GitHubPrApiResponse = {
+type GhPrJson = {
   number: number;
   title: string;
-  state: string;
-  html_url: string;
-  head: { ref: string } | null;
-  merged_at: string | null;
+  state: 'OPEN' | 'MERGED' | 'CLOSED';
+  url: string;
+  headRefName: string;
 };
 
 export class GitHubPrWatcher implements vscode.Disposable {
@@ -30,13 +29,10 @@ export class GitHubPrWatcher implements vscode.Disposable {
   private seeded = false;
   private callback: GitHubPrCallback | undefined;
   private started = false;
-  private lastETag: string | null = null;
+  private workspacePath: string | null = null;
+  private ghAvailable: boolean | null = null;
 
-  private static readonly POLL_INTERVAL_MS = 60_000; // 60 seconds
-
-  constructor(
-    private readonly getAccessToken: () => string | undefined,
-  ) {}
+  private static readonly POLL_INTERVAL_MS = 60_000;
 
   onPrEvent(callback: GitHubPrCallback): void {
     this.callback = callback;
@@ -45,6 +41,15 @@ export class GitHubPrWatcher implements vscode.Disposable {
   start(): void {
     if (this.started) { return; }
     this.started = true;
+
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+      console.log(`[BuildersHQ][PrWatcher] start: no workspace folders, skipping`);
+      return;
+    }
+    this.workspacePath = folders[0].uri.fsPath;
+
+    console.log(`[BuildersHQ][PrWatcher] start: cwd=${this.workspacePath}`);
 
     // Seed current PRs (no false events on startup)
     this.seedCurrentPrs();
@@ -58,7 +63,6 @@ export class GitHubPrWatcher implements vscode.Disposable {
     this.started = false;
     this.seeded = false;
     this.lastSeenPrs.clear();
-    this.lastETag = null;
     if (this.pollTimer !== undefined) {
       clearInterval(this.pollTimer);
       this.pollTimer = undefined;
@@ -73,57 +77,62 @@ export class GitHubPrWatcher implements vscode.Disposable {
     this.stop();
   }
 
-  private getRepoFullName(): string | null {
-    // getRepoName() returns "owner/repo" from cached git remote
-    return getRepoName();
+  /**
+   * Runs `gh pr list` to get recent PRs in all states.
+   * Uses the gh CLI which inherits the user's local GitHub auth.
+   */
+  private fetchRecentPrs(): Promise<GhPrJson[] | null> {
+    if (!this.workspacePath) { return Promise.resolve(null); }
+    if (this.ghAvailable === false) { return Promise.resolve(null); }
+
+    const cwd = this.workspacePath;
+
+    return new Promise((resolve) => {
+      execFile('gh', [
+        'pr', 'list',
+        '--state', 'all',
+        '--limit', '15',
+        '--json', 'number,title,state,url,headRefName',
+      ], { cwd, timeout: 15_000 }, (err, stdout) => {
+        if (err) {
+          const msg = err.message || String(err);
+          if (msg.includes('ENOENT') || msg.includes('not found')) {
+            console.log(`[BuildersHQ][PrWatcher] gh CLI not found — PR watching disabled`);
+            this.ghAvailable = false;
+          } else if (msg.includes('not logged')) {
+            console.log(`[BuildersHQ][PrWatcher] gh not authenticated — run "gh auth login"`);
+            this.ghAvailable = false;
+          } else {
+            console.log(`[BuildersHQ][PrWatcher] gh pr list error: ${msg}`);
+          }
+          resolve(null);
+          return;
+        }
+
+        this.ghAvailable = true;
+        try {
+          const prs = JSON.parse(stdout.trim()) as GhPrJson[];
+          resolve(prs);
+        } catch (parseErr) {
+          console.log(`[BuildersHQ][PrWatcher] gh output parse error: ${parseErr}`);
+          resolve(null);
+        }
+      });
+    });
   }
 
-  private async fetchRecentPrs(): Promise<GitHubPrApiResponse[] | null> {
-    const repoFullName = this.getRepoFullName();
-    if (!repoFullName) { return null; }
+  private getRepoFullName(): string | null {
+    if (!this.workspacePath) { return null; }
+    // Extract from gh — but we'll derive it from PR urls instead
+    return null;
+  }
 
-    const token = this.getAccessToken();
-    if (!token) { return null; }
-
-    const headers: Record<string, string> = {
-      'Accept': 'application/vnd.github+json',
-      'Authorization': `Bearer ${token}`,
-      'User-Agent': 'buildershq-vscode',
-    };
-
-    // Use conditional request to avoid rate limit consumption
-    if (this.lastETag) {
-      headers['If-None-Match'] = this.lastETag;
-    }
-
-    try {
-      const url = `https://api.github.com/repos/${repoFullName}/pulls?state=all&sort=updated&per_page=10`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-
-      const res = await fetch(url, { headers, signal: controller.signal });
-      clearTimeout(timeout);
-
-      if (res.status === 304) {
-        // Not modified — no new data
-        return null;
-      }
-
-      if (!res.ok) {
-        console.log(`[BuildersHQ] GitHub PR fetch failed: ${res.status}`);
-        return null;
-      }
-
-      const etag = res.headers.get('etag');
-      if (etag) {
-        this.lastETag = etag;
-      }
-
-      return await res.json() as GitHubPrApiResponse[];
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[BuildersHQ] GitHub PR fetch error: ${msg}`);
-      return null;
+  private normalizeState(ghState: string): 'open' | 'merged' | 'closed' {
+    switch (ghState) {
+      case 'OPEN': return 'open';
+      case 'MERGED': return 'merged';
+      case 'CLOSED': return 'closed';
+      default: return 'closed';
     }
   }
 
@@ -131,79 +140,66 @@ export class GitHubPrWatcher implements vscode.Disposable {
     const prs = await this.fetchRecentPrs();
     if (prs) {
       for (const pr of prs) {
-        this.lastSeenPrs.set(pr.number, {
-          state: pr.state,
-          mergedAt: pr.merged_at,
-        });
+        this.lastSeenPrs.set(pr.number, { state: this.normalizeState(pr.state) });
       }
     }
     this.seeded = true;
-    console.log(`[BuildersHQ] PR watcher seeded: ${this.lastSeenPrs.size} PRs`);
+    console.log(`[BuildersHQ][PrWatcher] seeded: ${this.lastSeenPrs.size} PRs, ghAvailable=${this.ghAvailable}`);
   }
 
   private async checkForNewPrs(): Promise<void> {
-    const repoFullName = this.getRepoFullName();
-    if (!repoFullName) {
-      console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: no repoFullName, skipping`);
-      return;
-    }
-
-    const token = this.getAccessToken();
-    console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: repo=${repoFullName} hasToken=${!!token} seeded=${this.seeded} lastSeenCount=${this.lastSeenPrs.size}`);
-
     const prs = await this.fetchRecentPrs();
     if (!prs) {
-      console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: fetchRecentPrs returned null (304 or error)`);
       return;
     }
-    console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: fetched ${prs.length} PRs`);
+    console.log(`[BuildersHQ][PrWatcher] poll: fetched ${prs.length} PRs, tracking ${this.lastSeenPrs.size}`);
 
     for (const pr of prs) {
       const prev = this.lastSeenPrs.get(pr.number);
+      const curState = this.normalizeState(pr.state);
+      // Extract repo from PR url: https://github.com/owner/repo/pull/N
+      const repoMatch = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//);
+      const repoFullName = repoMatch?.[1] ?? '';
 
       if (!prev) {
-        console.log(`[BuildersHQ][PrWatcher] New PR #${pr.number} state=${pr.state} merged_at=${pr.merged_at}`);
         // New PR we haven't seen before
-        if (pr.state === 'open') {
+        if (curState === 'open') {
+          console.log(`[BuildersHQ][PrWatcher] New open PR #${pr.number}: "${pr.title}"`);
           this.emitEvent({
             timestamp: Date.now(),
             eventType: 'pr_opened',
             prNumber: pr.number,
             prTitle: pr.title.slice(0, 200),
-            prUrl: pr.html_url,
-            branch: pr.head?.ref ?? null,
+            prUrl: pr.url,
+            branch: pr.headRefName || null,
             repoFullName,
           });
         }
-      } else if (!prev.mergedAt && pr.merged_at) {
-        console.log(`[BuildersHQ][PrWatcher] PR #${pr.number} was MERGED (prev.mergedAt=${prev.mergedAt} -> cur.merged_at=${pr.merged_at})`);
-        // PR was merged since last check
+      } else if (prev.state === 'open' && curState === 'merged') {
+        console.log(`[BuildersHQ][PrWatcher] PR #${pr.number} MERGED`);
         this.emitEvent({
           timestamp: Date.now(),
           eventType: 'pr_merged',
           prNumber: pr.number,
           prTitle: pr.title.slice(0, 200),
-          prUrl: pr.html_url,
-          branch: pr.head?.ref ?? null,
+          prUrl: pr.url,
+          branch: pr.headRefName || null,
           repoFullName,
         });
-      } else if (prev.state === 'open' && pr.state === 'closed' && !pr.merged_at) {
-        // PR was closed without being merged
+      } else if (prev.state === 'open' && curState === 'closed') {
+        console.log(`[BuildersHQ][PrWatcher] PR #${pr.number} CLOSED`);
         this.emitEvent({
           timestamp: Date.now(),
           eventType: 'pr_closed',
           prNumber: pr.number,
           prTitle: pr.title.slice(0, 200),
-          prUrl: pr.html_url,
-          branch: pr.head?.ref ?? null,
+          prUrl: pr.url,
+          branch: pr.headRefName || null,
           repoFullName,
         });
       }
 
-      this.lastSeenPrs.set(pr.number, {
-        state: pr.state,
-        mergedAt: pr.merged_at,
-      });
+      this.lastSeenPrs.set(pr.number, { state: curState });
     }
   }
 
