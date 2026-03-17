@@ -2,7 +2,7 @@
   "name": "buildershq",
   "displayName": "BuildersHQ",
   "description": "Track your developer presence across workspaces. Reports your active, idle, or away status — including Claude Code and git activity — to buildershq.net or a self-hosted server.",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "publisher": "buildershq",
   "license": "MIT",
   "icon": "icon.png",
@@ -157,6 +157,11 @@
           "type": "string",
           "default": "",
           "description": "Optional path to a .env file supplying PRESENCE_SERVER_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and MONGODB_URI. PRESENCE_SERVER_URL overrides the serverUrl setting. Leave empty to skip."
+        },
+        "buildershq.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ship debug logs to the server for pipeline diagnostics. Enable when debugging event delivery issues."
         }
       }
     }

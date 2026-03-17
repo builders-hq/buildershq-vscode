@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { PresenceStatus, ActivityReason } from './presence';
 import { getWorkspaceId, getWorkspaceName, getRepoUrl, getRepoName } from './workspace';
 import { ClaudeActivityEvent } from './claudeWatcher';
@@ -98,6 +99,7 @@ export interface HeartbeatPayload {
   machineToken?: string;
   user?: HeartbeatUser;
   activities?: ActivityBlock[];
+  traceId?: string;
 }
 
 interface HeartbeatServiceOptions {
@@ -386,6 +388,7 @@ export class HeartbeatService {
     const folders = vscode.workspace.workspaceFolders;
     const multiRootWorkspace = (folders?.length ?? 0) > 1;
 
+    const traceId = crypto.randomUUID().slice(0, 8);
     const payload: HeartbeatPayload = {
       timestamp: Math.floor(Date.now() / 1000),
       schemaVersion: SCHEMA_VERSION,
@@ -405,6 +408,7 @@ export class HeartbeatService {
       activeFileExt,
       gitBranch,
       multiRootWorkspace,
+      traceId,
       ...(this.currentDebugType !== null && { debugType: this.currentDebugType }),
       ...(this.currentTaskName !== null && { taskName: this.currentTaskName }),
     };
@@ -453,8 +457,15 @@ export class HeartbeatService {
         console.log(`[BuildersHQ][Heartbeat] Payload includes git/github activities: ${JSON.stringify(gitGhActivities.map(a => ({ type: a.type, source: a.source, summary: a.summary, claudeSessionId: a.claudeSessionId })))}`);
       }
     }
-    console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
+    console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending heartbeat: traceId=${traceId} status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
     this.persist(payload);
+    this.shipDebugLog(payload, 'heartbeat_sent', {
+      traceId,
+      seq: payload.seq,
+      status: payload.status,
+      activityCount: payload.activities?.length ?? 0,
+      gitActivities: payload.activities?.filter(a => a.source === 'git' || a.source === 'github').length ?? 0,
+    });
     this.postPayload(payload);
   }
 
@@ -638,5 +649,33 @@ export class HeartbeatService {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[BuildersHQ] Failed to persist heartbeat: ${message}`);
     });
+  }
+
+  /**
+   * Ship a structured debug log entry to the server (fire-and-forget).
+   * Only sends when buildershq.debugLogging is enabled.
+   */
+  private shipDebugLog(payload: HeartbeatPayload, action: string, details: Record<string, unknown>): void {
+    const config = vscode.workspace.getConfiguration('buildershq');
+    if (!config.get<boolean>('debugLogging', false)) {
+      return;
+    }
+
+    const debugUrl = this.endpointUrl.replace(/\/api\/presence$/, '/api/debug/extension-logs');
+    const doc = {
+      traceId: payload.traceId,
+      githubLogin: payload.user?.githubLogin,
+      computerName: os.hostname(),
+      clientVersion: getClientVersion(),
+      action,
+      level: 'info',
+      details,
+    };
+
+    fetch(debugUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(doc),
+    }).catch(() => {});
   }
 }
