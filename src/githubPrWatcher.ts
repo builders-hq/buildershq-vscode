@@ -143,15 +143,26 @@ export class GitHubPrWatcher implements vscode.Disposable {
 
   private async checkForNewPrs(): Promise<void> {
     const repoFullName = this.getRepoFullName();
-    if (!repoFullName) { return; }
+    if (!repoFullName) {
+      console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: no repoFullName, skipping`);
+      return;
+    }
+
+    const token = this.getAccessToken();
+    console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: repo=${repoFullName} hasToken=${!!token} seeded=${this.seeded} lastSeenCount=${this.lastSeenPrs.size}`);
 
     const prs = await this.fetchRecentPrs();
-    if (!prs) { return; }
+    if (!prs) {
+      console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: fetchRecentPrs returned null (304 or error)`);
+      return;
+    }
+    console.log(`[BuildersHQ][PrWatcher] checkForNewPrs: fetched ${prs.length} PRs`);
 
     for (const pr of prs) {
       const prev = this.lastSeenPrs.get(pr.number);
 
       if (!prev) {
+        console.log(`[BuildersHQ][PrWatcher] New PR #${pr.number} state=${pr.state} merged_at=${pr.merged_at}`);
         // New PR we haven't seen before
         if (pr.state === 'open') {
           this.emitEvent({
@@ -165,6 +176,7 @@ export class GitHubPrWatcher implements vscode.Disposable {
           });
         }
       } else if (!prev.mergedAt && pr.merged_at) {
+        console.log(`[BuildersHQ][PrWatcher] PR #${pr.number} was MERGED (prev.mergedAt=${prev.mergedAt} -> cur.merged_at=${pr.merged_at})`);
         // PR was merged since last check
         this.emitEvent({
           timestamp: Date.now(),

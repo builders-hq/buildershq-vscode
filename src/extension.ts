@@ -793,7 +793,11 @@ function initGitCommitTracking(
   gitWatcher = new GitCommitWatcher();
 
   gitWatcher.onCommit((event) => {
-    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    console.log(`[BuildersHQ][Extension] Commit event callback fired: ${event.shortHash} "${event.subject}" on ${event.branch ?? 'detached'}`);
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+      console.log(`[BuildersHQ][Extension] Commit event SKIPPED (paused)`);
+      return;
+    }
     heartbeatService!.setActivity({
       timestamp: event.timestamp,
       claudeSessionId: 'git',
@@ -843,7 +847,11 @@ function initGitBranchTracking(
   gitBranchWatcher = new GitBranchWatcher();
 
   gitBranchWatcher.onBranchEvent((event) => {
-    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    console.log(`[BuildersHQ][Extension] Branch event callback fired: ${event.eventType} ${event.branchName}`);
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+      console.log(`[BuildersHQ][Extension] Branch event SKIPPED (paused)`);
+      return;
+    }
     const label = event.eventType === 'branch_created' ? 'Created branch' : 'Deleted branch';
     heartbeatService!.setActivity({
       timestamp: event.timestamp,
@@ -860,7 +868,10 @@ function initGitBranchTracking(
   });
 
   if (!isPaused) {
+    console.log(`[BuildersHQ][Extension] Starting gitBranchWatcher`);
     gitBranchWatcher.start();
+  } else {
+    console.log(`[BuildersHQ][Extension] gitBranchWatcher NOT started (paused)`);
   }
 
   context.subscriptions.push(gitBranchWatcher);
@@ -880,7 +891,11 @@ function initGithubPrTracking(
   );
 
   githubPrWatcher.onPrEvent((event) => {
-    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) { return; }
+    console.log(`[BuildersHQ][Extension] PR event callback fired: ${event.eventType} #${event.prNumber} "${event.prTitle}"`);
+    if (context.globalState.get<boolean>(PAUSE_STATE_KEY, false)) {
+      console.log(`[BuildersHQ][Extension] PR event SKIPPED (paused)`);
+      return;
+    }
     const labelMap: Record<string, string> = { pr_opened: 'Opened', pr_merged: 'Merged', pr_closed: 'Closed' };
     const label = labelMap[event.eventType] ?? event.eventType;
     heartbeatService!.setActivity({
@@ -898,7 +913,10 @@ function initGithubPrTracking(
   });
 
   if (!isPaused) {
+    console.log(`[BuildersHQ][Extension] Starting githubPrWatcher`);
     githubPrWatcher.start();
+  } else {
+    console.log(`[BuildersHQ][Extension] githubPrWatcher NOT started (paused)`);
   }
 
   context.subscriptions.push(githubPrWatcher);

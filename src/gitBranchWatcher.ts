@@ -83,6 +83,7 @@ export class GitBranchWatcher implements vscode.Disposable {
   }
 
   private debouncedCheck(): void {
+    console.log(`[BuildersHQ][BranchWatcher] fs.watch fired, debouncing...`);
     if (this.debounceTimer !== undefined) { clearTimeout(this.debounceTimer); }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
@@ -110,22 +111,30 @@ export class GitBranchWatcher implements vscode.Disposable {
   }
 
   private checkForBranchChanges(): void {
-    if (!this.workspacePath || !this.seeded) { return; }
+    if (!this.workspacePath || !this.seeded) {
+      console.log(`[BuildersHQ][BranchWatcher] checkForBranchChanges skipped: workspacePath=${!!this.workspacePath} seeded=${this.seeded}`);
+      return;
+    }
+    console.log(`[BuildersHQ][BranchWatcher] checkForBranchChanges running, known=${this.knownBranches.size}`);
     execFile('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'],
       { cwd: this.workspacePath, timeout: 3000 },
       (err, stdout) => {
-        if (err) { return; }
+        if (err) {
+          console.log(`[BuildersHQ][BranchWatcher] git for-each-ref error: ${err.message}`);
+          return;
+        }
 
         const currentBranches = new Set<string>();
         for (const line of stdout.trim().split('\n')) {
           const branch = line.trim();
           if (branch) { currentBranches.add(branch); }
         }
+        console.log(`[BuildersHQ][BranchWatcher] current=${currentBranches.size} known=${this.knownBranches.size} current=[${[...currentBranches].join(',')}] known=[${[...this.knownBranches].join(',')}]`);
 
         // Detect new branches
         for (const branch of currentBranches) {
           if (!this.knownBranches.has(branch)) {
-            console.log(`[BuildersHQ] Branch created: ${branch}`);
+            console.log(`[BuildersHQ][BranchWatcher] Branch created: ${branch}, hasCallback=${!!this.callback}`);
             this.callback?.({
               timestamp: Date.now(),
               eventType: 'branch_created',
@@ -137,7 +146,7 @@ export class GitBranchWatcher implements vscode.Disposable {
         // Detect deleted branches
         for (const branch of this.knownBranches) {
           if (!currentBranches.has(branch)) {
-            console.log(`[BuildersHQ] Branch deleted: ${branch}`);
+            console.log(`[BuildersHQ][BranchWatcher] Branch deleted: ${branch}, hasCallback=${!!this.callback}`);
             this.callback?.({
               timestamp: Date.now(),
               eventType: 'branch_deleted',

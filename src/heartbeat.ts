@@ -232,6 +232,10 @@ export class HeartbeatService {
     this.activitySeq += 1;
     this.lastActivityAt = Date.now();
 
+    if (source === 'git' || source === 'github') {
+      console.log(`[BuildersHQ][Heartbeat] setActivity: source=${source} type=${event.activityType} sessionId=${event.claudeSessionId} summary="${event.summary}" gitBranch=${event.gitBranch} gitCommitHash=${event.gitCommitHash ?? 'none'}`);
+    }
+
     // Carry forward prompt from previous activity for same session so it
     // persists across activity-type transitions (prompting → thinking → editing).
     const existing = this.pendingActivities.get(event.claudeSessionId)
@@ -443,6 +447,12 @@ export class HeartbeatService {
     }
 
     const activityInfo = payload.activities ? ` activities=${payload.activities.length}` : '';
+    if (payload.activities) {
+      const gitGhActivities = payload.activities.filter(a => a.source === 'git' || a.source === 'github');
+      if (gitGhActivities.length > 0) {
+        console.log(`[BuildersHQ][Heartbeat] Payload includes git/github activities: ${JSON.stringify(gitGhActivities.map(a => ({ type: a.type, source: a.source, summary: a.summary, claudeSessionId: a.claudeSessionId })))}`);
+      }
+    }
     console.log(`[BuildersHQ] ${new Date().toLocaleTimeString()} Sending heartbeat: status=${payload.status} reason=${payload.reason} seq=${payload.seq}${activityInfo}`);
     this.persist(payload);
     this.postPayload(payload);
