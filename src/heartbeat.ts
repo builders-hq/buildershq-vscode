@@ -12,7 +12,7 @@ const CLIENT_TYPE = 'vscode';
 const SCHEMA_VERSION = 1;
 
 function getClientVersion(): string {
-  return vscode.extensions.getExtension('appmakers.buildershq')?.packageJSON?.version ?? '0.0.0';
+  return vscode.extensions.getExtension('buildershq.buildershq')?.packageJSON?.version ?? '0.0.0';
 }
 
 function getGitBranch(): string | null {
