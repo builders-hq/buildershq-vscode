@@ -2,6 +2,17 @@
 
 All notable changes to BuildersHQ will be documented in this file.
 
+## [1.0.35] - 2026-03-16
+
+### Added
+- GitHub PR watcher for room event tracking (PR opened/merged)
+- PR close, branch create/delete events in room activity feed
+- Debug logging for git/github event pipeline
+
+### Fixed
+- Encoding issue in heartbeat.ts
+- Suspend heartbeats after 2 hours of away status
+
 ## [1.0.0] - 2026-02-27
 
 ### Added
