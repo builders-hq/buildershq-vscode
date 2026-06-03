@@ -291,6 +291,41 @@ body.drag-over .dropzone-text { color: var(--user); }
 .para + .para { margin-top: 6px; }
 .para + pre.code-block, pre.code-block + .para { margin-top: 6px; }
 
+.md-h { margin: 14px 0 6px; font-weight: 700; line-height: 1.3; color: var(--text); }
+.md-h:first-child { margin-top: 2px; }
+.md-h1 { font-size: 22px; letter-spacing: -0.01em; }
+.md-h2 { font-size: 18px; }
+.md-h3 { font-size: 16px; }
+.md-h4, .md-h5, .md-h6 { font-size: 14px; }
+.md-ul, .md-ol { margin: 6px 0; padding-left: 24px; }
+.md-ul li, .md-ol li { margin: 2px 0; }
+.md-ul li::marker { color: var(--muted); }
+.md-bq {
+  margin: 8px 0;
+  padding: 2px 14px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--muted);
+  background: #fbfbfc;
+}
+.text strong, .para strong { font-weight: 700; }
+.text em, .para em { font-style: italic; }
+.text del, .para del { color: var(--muted); }
+
+.cmd-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  color: #4338ca;
+  margin-bottom: 4px;
+}
+.cmd-glyph { color: #818cf8; font-weight: 700; }
+.cmd-name { font-weight: 600; }
+.cmd-pill + .text { margin-top: 8px; }
+
 pre.code-block {
   background: var(--code-bg);
   border-radius: 6px;
@@ -597,18 +632,60 @@ function escapeHtml(s) {
   }[c]));
 }
 
+function renderInline(text) {
+  let t = escapeHtml(text);
+  t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(?<![*\w])\*([^*\n]+?)\*(?![*\w])/g, '<em>$1</em>');
+  t = t.replace(/(?<![_\w])_([^_\n]+?)_(?![_\w])/g, '<em>$1</em>');
+  t = t.replace(/~~([^~\n]+?)~~/g, '<del>$1</del>');
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  t = t.replace(/(?<!href=["'])(?<!>)(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  return t;
+}
+
 function renderText(text) {
   const parts = String(text).split(/```(\w*)\n?([\s\S]*?)```/g);
   let html = '';
   for (let i = 0; i < parts.length; i++) {
     if (i % 3 === 0) {
-      const paras = String(parts[i]).split(/\n\n+/);
-      for (const p of paras) {
-        if (!p.trim()) continue;
-        let t = escapeHtml(p);
-        t = t.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-        t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-        html += `<p class="para">${t}</p>`;
+      const blocks = String(parts[i]).split(/\n\n+/);
+      for (const block of blocks) {
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+        const lines = trimmed.split('\n');
+        if (lines.length === 1) {
+          const h = lines[0].match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+          if (h) {
+            const lvl = h[1].length;
+            html += `<h${lvl} class="md-h md-h${lvl}">${renderInline(h[2])}</h${lvl}>`;
+            continue;
+          }
+        }
+        if (lines.every(l => /^\s*[-*+]\s+/.test(l))) {
+          html += '<ul class="md-ul">';
+          for (const l of lines) {
+            const m = l.match(/^\s*[-*+]\s+(.*)$/);
+            if (m) html += `<li>${renderInline(m[1])}</li>`;
+          }
+          html += '</ul>';
+          continue;
+        }
+        if (lines.every(l => /^\s*\d+\.\s+/.test(l))) {
+          html += '<ol class="md-ol">';
+          for (const l of lines) {
+            const m = l.match(/^\s*\d+\.\s+(.*)$/);
+            if (m) html += `<li>${renderInline(m[1])}</li>`;
+          }
+          html += '</ol>';
+          continue;
+        }
+        if (lines.every(l => /^>\s?/.test(l) || /^\s*$/.test(l))) {
+          const inner = lines.map(l => l.replace(/^>\s?/, '')).join('\n');
+          html += `<blockquote class="md-bq">${renderInline(inner).replace(/\n/g, '<br>')}</blockquote>`;
+          continue;
+        }
+        html += `<p class="para">${renderInline(trimmed).replace(/\n/g, '<br>')}</p>`;
       }
     } else if (i % 3 === 2) {
       html += `<pre class="code-block"><code>${escapeHtml(parts[i])}</code></pre>`;
@@ -761,9 +838,33 @@ function renderAssistantContent(content) {
   return html;
 }
 
+function parseSlashCommand(content) {
+  const m = String(content).match(
+    /^\s*<command-message>([^<]*)<\/command-message>\s*<command-name>([^<]*)<\/command-name>(?:\s*<command-args>[^<]*<\/command-args>)?\s*([\s\S]*)$/
+  );
+  if (!m) return null;
+  return { name: m[2].trim(), trailing: m[3].trim() };
+}
+
+function previewFromUserContent(content) {
+  const cmd = parseSlashCommand(content);
+  if (cmd) {
+    const base = cmd.name;
+    return cmd.trailing ? `${base} · ${cmd.trailing.split(/\r?\n/)[0]}`.slice(0, 100) : base;
+  }
+  const text = String(content).trim();
+  return text.split(/\r?\n/)[0].slice(0, 100) || text.slice(0, 100);
+}
+
 function renderUserContent(content) {
-  if (typeof content === 'string') return `<div class="text">${renderText(content)}</div>`;
-  return '';
+  if (typeof content !== 'string') return '';
+  const cmd = parseSlashCommand(content);
+  if (cmd) {
+    let html = `<div class="cmd-pill"><span class="cmd-glyph">/</span><span class="cmd-name">${escapeHtml(cmd.name.replace(/^\//, ''))}</span></div>`;
+    if (cmd.trailing) html += `<div class="text">${renderText(cmd.trailing)}</div>`;
+    return html;
+  }
+  return `<div class="text">${renderText(content)}</div>`;
 }
 
 function renderTurn(r) {
@@ -890,8 +991,7 @@ function buildNav() {
     if (r.type === 'user' && typeof r.message?.content === 'string') {
       const navId = `turn-${userIdx}`;
       r.__navId = navId;
-      const text = r.message.content.trim();
-      const preview = text.split(/\r?\n/)[0].slice(0, 100) || text.slice(0, 100);
+      const preview = previewFromUserContent(r.message.content);
       navItems.push({ navId, kind: 'user', label: String(userIdx + 1), preview });
       userIdx++;
     } else if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
