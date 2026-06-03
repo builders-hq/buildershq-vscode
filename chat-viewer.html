@@ -97,11 +97,12 @@ main {
   margin: 0 auto;
   padding: 28px 24px 80px;
   display: grid;
-  grid-template-columns: var(--nav-width) 1fr;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
   gap: 32px;
   align-items: start;
 }
-main.no-nav { grid-template-columns: 1fr; }
+main.no-nav { grid-template-columns: minmax(0, 1fr); }
+#content { min-width: 0; }
 main.no-nav .nav-rail { display: none; }
 
 .nav-rail {
@@ -301,6 +302,7 @@ pre.code-block code { background: none; border: none; padding: 0; white-space: p
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
