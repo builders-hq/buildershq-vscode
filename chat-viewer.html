@@ -92,6 +92,46 @@ input[type="search"]:focus { outline: 2px solid var(--user); outline-offset: -1p
 }
 .stat strong { color: var(--text); font-weight: 600; }
 
+.filters {
+  max-width: 1040px; margin: 8px auto 0;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  font-size: 12px;
+}
+.filters-label { color: var(--muted); margin-right: 2px; font-size: 11.5px; }
+.filter-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  user-select: none;
+  font-family: inherit;
+  line-height: 1.5;
+  transition: opacity 0.12s, background 0.12s;
+}
+.filter-pill:hover { filter: brightness(0.97); }
+.filter-pill .pill-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  opacity: 0.8;
+  font-size: 11px;
+}
+.filter-pill { background: #fef3c7; color: #92400e; }
+.filter-pill[data-tool-cls="bash"], .filter-pill[data-tool-cls="powershell"] { background: #dcfce7; color: #166534; }
+.filter-pill[data-tool-cls="read"], .filter-pill[data-tool-cls="glob"], .filter-pill[data-tool-cls="grep"] { background: #dbeafe; color: #1e40af; }
+.filter-pill[data-tool-cls="edit"], .filter-pill[data-tool-cls="write"], .filter-pill[data-tool-cls="notebookedit"] { background: #fce7f3; color: #9d174d; }
+.filter-pill[data-tool-cls="task"], .filter-pill[data-tool-cls="agent"] { background: #ede9fe; color: #5b21b6; }
+.filter-pill[data-tool-cls="webfetch"], .filter-pill[data-tool-cls="websearch"] { background: #fef3c7; color: #92400e; }
+.filter-pill.off {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border-color: var(--border-strong);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-strong);
+}
+
 main {
   max-width: 1320px;
   margin: 0 auto;
@@ -374,6 +414,7 @@ pre.code-block code { background: none; border: none; padding: 0; white-space: p
     <input type="file" id="file-input" accept=".jsonl,.json,.txt" style="display:none">
   </div>
   <div class="stats" id="stats" hidden></div>
+  <div class="filters" id="filters" hidden></div>
 </header>
 
 <main class="no-nav" id="main">
@@ -391,6 +432,17 @@ let records = [];
 let toolResults = {};
 let userTurns = [];
 let scrollObserver = null;
+let hiddenTools = new Set();
+
+const TOOL_FILTER_KEY = 'claude-viewer:hidden-tools-v1';
+try {
+  const saved = localStorage.getItem(TOOL_FILTER_KEY);
+  if (saved) hiddenTools = new Set(JSON.parse(saved));
+} catch {}
+
+function persistHiddenTools() {
+  try { localStorage.setItem(TOOL_FILTER_KEY, JSON.stringify([...hiddenTools])); } catch {}
+}
 
 function parseJsonl(text) {
   return text.split(/\r?\n/).filter(l => l.trim().length).map((line, i) => {
@@ -496,6 +548,7 @@ function renderAssistantContent(content) {
     } else if (block.type === 'thinking') {
       continue;
     } else if (block.type === 'tool_use') {
+      if (hiddenTools.has(block.name)) continue;
       const summary = summarizeToolInput(block.name, block.input);
       const inputJson = JSON.stringify(block.input ?? {}, null, 2);
       const cls = (block.name || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -641,6 +694,26 @@ function render() {
   requestAnimationFrame(setupScrollSpy);
 }
 
+function buildFilters() {
+  const counts = new Map();
+  for (const r of records) {
+    if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+      for (const b of r.message.content) {
+        if (b.type === 'tool_use' && b.name) counts.set(b.name, (counts.get(b.name) || 0) + 1);
+      }
+    }
+  }
+  const el = $('#filters');
+  if (counts.size === 0) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const names = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  el.innerHTML = '<span class="filters-label">Hide:</span>' + names.map(([name, count]) => {
+    const cls = name.toLowerCase().replace(/[^a-z]/g, '');
+    const off = hiddenTools.has(name) ? 'off' : '';
+    return `<button class="filter-pill ${off}" data-tool="${escapeHtml(name)}" data-tool-cls="${cls}">${escapeHtml(name)}<span class="pill-count">${count}</span></button>`;
+  }).join('');
+}
+
 function buildNav() {
   let idx = 0;
   userTurns = [];
@@ -734,6 +807,7 @@ function loadRecords(text, opts = {}) {
   records = parseJsonl(text);
   toolResults = buildToolResultMap(records);
   buildNav();
+  buildFilters();
   if (opts.persist !== false) persistSession(text);
 
   const lastTitle = [...records].reverse().find(r => r.type === 'ai-title')?.aiTitle;
@@ -813,6 +887,16 @@ $('#nav-list').addEventListener('click', (e) => {
   const idx = item.dataset.turnIndex;
   const turn = document.querySelector(`.turn[data-turn-index="${idx}"]`);
   if (turn) turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+$('#filters').addEventListener('click', (e) => {
+  const pill = e.target.closest('.filter-pill');
+  if (!pill) return;
+  const name = pill.dataset.tool;
+  if (hiddenTools.has(name)) { hiddenTools.delete(name); pill.classList.remove('off'); }
+  else { hiddenTools.add(name); pill.classList.add('off'); }
+  persistHiddenTools();
+  render();
 });
 
 // Restore previously viewed session on page load
