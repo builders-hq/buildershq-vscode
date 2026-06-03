@@ -240,12 +240,58 @@ main.no-nav .nav-rail { display: none; }
 body.drag-over .dropzone { border-color: var(--user); background: #eef2ff; }
 body.drag-over .dropzone-text { color: var(--user); }
 
-.turn { margin-bottom: 14px; scroll-margin-top: calc(var(--header-offset) + 8px); }
+.turn { margin-bottom: 14px; scroll-margin-top: calc(var(--header-offset) + 8px); position: relative; }
 .turn-header {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 6px;
   font-size: 12px; color: var(--muted);
   flex-wrap: wrap;
+}
+
+.msg-link {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,0.85);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, border-color 0.12s, color 0.12s;
+  z-index: 2;
+  font-family: inherit;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.turn:hover > .msg-link,
+.ask-card:hover > .msg-link,
+.msg-link:focus-visible { opacity: 0.7; }
+.msg-link:hover {
+  opacity: 1 !important;
+  background: white;
+  border-color: var(--border);
+  color: var(--text);
+}
+.msg-link svg { width: 14px; height: 14px; pointer-events: none; }
+.msg-link .icon-check { display: none; }
+.msg-link.copied { color: var(--assistant); opacity: 1 !important; border-color: #a7f3d0; background: #ecfdf5; }
+.msg-link.copied .icon-link { display: none; }
+.msg-link.copied .icon-check { display: block; }
+
+.turn.hash-flash > .content,
+.ask-card.hash-flash {
+  animation: hash-flash 2.4s ease-out;
+}
+@keyframes hash-flash {
+  0%, 14% { box-shadow: 0 0 0 3px rgba(99,102,241,0.45), var(--shadow); }
+  100% { box-shadow: var(--shadow); }
 }
 .role {
   font-weight: 600; font-size: 12px;
@@ -443,6 +489,8 @@ pre.code-block code { background: none; border: none; padding: 0; white-space: p
   background: linear-gradient(180deg, #fbfbff, white);
   margin: 12px 0;
   padding: 14px 18px;
+  position: relative;
+  scroll-margin-top: calc(var(--header-offset) + 8px);
 }
 .ask-header {
   display: flex; align-items: center; gap: 8px;
@@ -651,6 +699,13 @@ function escapeHtml(s) {
   }[c]));
 }
 
+const COPY_LINK_ICONS = `<svg class="icon-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+function renderCopyLink(anchorId) {
+  if (!anchorId) return '';
+  return `<button type="button" class="msg-link" data-anchor="${anchorId}" title="Copy link to this message" aria-label="Copy link to this message">${COPY_LINK_ICONS}</button>`;
+}
+
 function renderInline(text) {
   let t = escapeHtml(text);
   t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
@@ -795,6 +850,7 @@ function renderAskQuestion(block) {
   const idAttr = navId ? `id="${navId}" data-nav-id="${navId}"` : '';
 
   let html = `<div class="ask-card" ${idAttr}>`;
+  html += renderCopyLink(navId);
   html += '<div class="ask-header"><span class="ask-icon">?</span><span>Question</span></div>';
 
   for (const q of questions) {
@@ -924,6 +980,7 @@ function renderTurn(r) {
     const idAttr = navId ? `id="${navId}" data-nav-id="${navId}"` : '';
     return `
       <div class="turn" data-role="user" ${idAttr}>
+        ${renderCopyLink(navId)}
         <div class="turn-header">
           <span class="role user">User</span>
           ${sidechain}
@@ -943,7 +1000,9 @@ function renderAssistantGroup(records) {
   }
   const inner = renderAssistantContent(combined);
   if (!inner.trim()) return '';
-  return `<div class="turn" data-role="assistant"><div class="content assistant-msg">${inner}</div></div>`;
+  const anchorId = records[0]?.__groupAnchor;
+  const idAttr = anchorId ? `id="${anchorId}"` : '';
+  return `<div class="turn" data-role="assistant" ${idAttr}>${renderCopyLink(anchorId)}<div class="content assistant-msg">${inner}</div></div>`;
 }
 
 function renderMetadataRow(r) {
@@ -1035,15 +1094,18 @@ function render() {
 function buildNav() {
   let userIdx = 0;
   let askIdx = 0;
+  let replyIdx = 0;
   navItems = [];
+  let inAssistantGroup = false;
   for (const r of records) {
-    if (r.type === 'user' && typeof r.message?.content === 'string') {
-      const navId = `turn-${userIdx}`;
-      r.__navId = navId;
-      const preview = previewFromUserContent(r.message.content);
-      navItems.push({ navId, kind: 'user', label: String(userIdx + 1), preview });
-      userIdx++;
-    } else if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+    r.__groupAnchor = undefined;
+    if (isToolResultOnly(r) || METADATA_TYPES.has(r.type)) continue;
+    if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+      if (!inAssistantGroup) {
+        r.__groupAnchor = `reply-${replyIdx}`;
+        replyIdx++;
+        inAssistantGroup = true;
+      }
       for (const b of r.message.content) {
         if (b.type === 'tool_use' && b.name === 'AskUserQuestion') {
           const navId = `ask-${askIdx}`;
@@ -1053,6 +1115,15 @@ function buildNav() {
           askIdx++;
         }
       }
+      continue;
+    }
+    inAssistantGroup = false;
+    if (r.type === 'user' && typeof r.message?.content === 'string') {
+      const navId = `turn-${userIdx}`;
+      r.__navId = navId;
+      const preview = previewFromUserContent(r.message.content);
+      navItems.push({ navId, kind: 'user', label: String(userIdx + 1), preview });
+      userIdx++;
     }
   }
   const html = navItems.map(it => `
@@ -1191,7 +1262,64 @@ function loadRecords(text, opts = {}) {
 
   $('#search').disabled = false;
   render();
+  scrollToHash();
 }
+
+function scrollToHash() {
+  const hash = location.hash.replace(/^#/, '');
+  if (!hash) return;
+  requestAnimationFrame(() => {
+    const target = document.getElementById(hash);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'auto', block: 'start' });
+    target.classList.remove('hash-flash');
+    void target.offsetWidth;
+    target.classList.add('hash-flash');
+    setTimeout(() => target.classList.remove('hash-flash'), 2500);
+  });
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand('copy'); } catch {}
+  document.body.removeChild(ta);
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.msg-link');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const anchorId = btn.dataset.anchor;
+  if (!anchorId) return;
+  const url = `${location.origin}${location.pathname}${location.search}#${anchorId}`;
+  const done = () => {
+    btn.classList.add('copied');
+    btn.title = 'Link copied!';
+    btn.setAttribute('aria-label', 'Link copied');
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.title = 'Copy link to this message';
+      btn.setAttribute('aria-label', 'Copy link to this message');
+    }, 1400);
+    try { history.replaceState(null, '', `#${anchorId}`); } catch {}
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done).catch(() => { fallbackCopy(url); done(); });
+  } else {
+    fallbackCopy(url);
+    done();
+  }
+});
+
+window.addEventListener('hashchange', scrollToHash);
 
 // File loading
 $('#load-btn').addEventListener('click', () => $('#file-input').click());
