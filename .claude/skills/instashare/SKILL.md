@@ -10,7 +10,7 @@ Upload the current Claude Code session JSONL to the InstaShare API and report th
 
 ## Configuration
 
-Endpoint defaults to `https://instashare-win.azurewebsites.net`. Override with the `INSTASHARE_API_URL` env var (use `http://localhost:3000` for local dev).
+Endpoint defaults to `https://instashare.to`. Override with the `INSTASHARE_API_URL` env var (use `http://localhost:3000` for local dev).
 
 ## Run exactly one of these
 
@@ -19,7 +19,7 @@ Pick by platform. Substitute nothing — the script computes the slug itself, fi
 ### Windows (PowerShell)
 
 ```powershell
-$apiBase = if ($env:INSTASHARE_API_URL) { $env:INSTASHARE_API_URL } else { 'https://instashare-win.azurewebsites.net' }
+$apiBase = if ($env:INSTASHARE_API_URL) { $env:INSTASHARE_API_URL } else { 'https://instashare.to' }
 $cwd = (Get-Location).Path
 $slug = ($cwd -replace ':', '-' -replace '\\', '-').ToLower()
 $projDir = Join-Path $env:USERPROFILE ".claude\projects\$slug"
@@ -34,7 +34,7 @@ Write-Output $resp.url
 ### macOS / Linux (Bash)
 
 ```bash
-api_base="${INSTASHARE_API_URL:-https://instashare-win.azurewebsites.net}"
+api_base="${INSTASHARE_API_URL:-https://instashare.to}"
 cwd="$(pwd)"
 slug=$(echo "$cwd" | sed 's#/#-#g' | tr '[:upper:]' '[:lower:]')
 slug=${slug#-}
