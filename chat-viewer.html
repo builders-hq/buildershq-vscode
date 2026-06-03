@@ -359,6 +359,95 @@ pre.code-block code { background: none; border: none; padding: 0; white-space: p
 .tool-body h4:not(:first-child) { margin-top: 14px; }
 .tool-body pre.code-block { font-size: 12px; background: white; }
 
+.ask-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid #6366f1;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfbff, white);
+  margin: 12px 0;
+  padding: 14px 18px;
+}
+.ask-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: #6366f1;
+  margin-bottom: 10px;
+}
+.ask-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: #6366f1; color: white;
+  font-size: 11px; font-weight: 700;
+}
+.ask-question + .ask-question {
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.ask-q-text {
+  font-weight: 600; font-size: 14px;
+  color: var(--text);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.ask-multiselect-hint {
+  font-size: 11px; color: var(--muted);
+  font-weight: 500;
+  margin-left: 6px;
+}
+.ask-options {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ask-option {
+  display: flex; gap: 10px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: white;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ask-option.chosen {
+  border-color: #6366f1;
+  background: #eef2ff;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.08);
+}
+.ask-marker {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 1px;
+  line-height: 1.2;
+}
+.ask-option.chosen .ask-marker { color: #6366f1; }
+.ask-option-body { min-width: 0; flex: 1; }
+.ask-option-label {
+  font-weight: 500;
+  color: var(--text);
+}
+.ask-option.chosen .ask-option-label { color: #4338ca; }
+.ask-option-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.ask-other-tag {
+  font-size: 9.5px;
+  background: #fef3c7; color: #92400e;
+  padding: 1px 6px; border-radius: 3px;
+  margin-left: 6px;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.ask-pending {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 8px;
+}
+
 .metadata-card {
   background: #f9fafb;
   border: 1px solid var(--border);
@@ -522,6 +611,74 @@ function summarizeToolInput(name, input) {
   return typeof v === 'string' ? `${first}: ${v.slice(0, 100)}` : `${first}: …`;
 }
 
+function parseAskAnswers(resultStr) {
+  const answers = {};
+  if (!resultStr) return answers;
+  const re = /"([^"]+)"="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(resultStr)) !== null) {
+    answers[m[1]] = m[2];
+  }
+  return answers;
+}
+
+function getToolResultText(toolUseId) {
+  const result = toolResults[toolUseId];
+  if (!result) return '';
+  const c = result.content;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) {
+    return c.filter(x => x.type === 'text').map(x => x.text).join('\n');
+  }
+  return '';
+}
+
+function renderAskQuestion(block) {
+  const input = block.input || {};
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  if (questions.length === 0) return '';
+  const answers = parseAskAnswers(getToolResultText(block.id));
+  const hasAnswers = Object.keys(answers).length > 0;
+
+  let html = '<div class="ask-card">';
+  html += '<div class="ask-header"><span class="ask-icon">?</span><span>Question</span></div>';
+
+  for (const q of questions) {
+    const selected = answers[q.question] || '';
+    html += '<div class="ask-question">';
+    html += `<div class="ask-q-text">${escapeHtml(q.question || '')}${q.multiSelect ? '<span class="ask-multiselect-hint">(multi-select)</span>' : ''}</div>`;
+    const options = Array.isArray(q.options) ? q.options : [];
+    html += '<ul class="ask-options">';
+    let matchedAny = false;
+    for (const opt of options) {
+      const label = opt.label || '';
+      const isChosen = selected === label
+        || (q.multiSelect && selected.split(/,\s*/).includes(label));
+      if (isChosen) matchedAny = true;
+      html += `<li class="ask-option ${isChosen ? 'chosen' : ''}">
+        <span class="ask-marker">${isChosen ? '●' : '○'}</span>
+        <div class="ask-option-body">
+          <div class="ask-option-label">${escapeHtml(label)}</div>
+          ${opt.description ? `<div class="ask-option-desc">${escapeHtml(opt.description)}</div>` : ''}
+        </div>
+      </li>`;
+    }
+    if (selected && !matchedAny) {
+      html += `<li class="ask-option chosen">
+        <span class="ask-marker">●</span>
+        <div class="ask-option-body">
+          <div class="ask-option-label">${escapeHtml(selected)}<span class="ask-other-tag">custom</span></div>
+        </div>
+      </li>`;
+    }
+    html += '</ul>';
+    if (!hasAnswers) html += '<div class="ask-pending">No answer captured</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function renderToolResultBlock(toolUseId) {
   const result = toolResults[toolUseId];
   if (!result) return '<em style="color:var(--muted);font-size:12px">No result captured</em>';
@@ -549,6 +706,10 @@ function renderAssistantContent(content) {
       continue;
     } else if (block.type === 'tool_use') {
       if (hiddenTools.has(block.name)) continue;
+      if (block.name === 'AskUserQuestion') {
+        html += renderAskQuestion(block);
+        continue;
+      }
       const summary = summarizeToolInput(block.name, block.input);
       const inputJson = JSON.stringify(block.input ?? {}, null, 2);
       const cls = (block.name || '').toLowerCase().replace(/[^a-z]/g, '');
