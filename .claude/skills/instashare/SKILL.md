@@ -1,10 +1,10 @@
 ---
-name: export-chat
-description: Export the current Claude Code chat session to a local JSONL file. Claude Code persists every session under ~/.claude/projects/<project-slug>/<session-uuid>.jsonl; this skill locates that file and copies it somewhere accessible. Use when the user asks to "export this chat", "save this conversation", "share this session", "give me the chat as a file", or similar. Local export only — no uploading.
+name: instashare
+description: InstaShare — export the current Claude Code chat session to a local JSONL file. Claude Code persists every session under ~/.claude/projects/<project-slug>/<session-uuid>.jsonl; this skill locates that file and copies it somewhere accessible. Use when the user asks to "export this chat", "save this conversation", "share this session", "give me the chat as a file", "InstaShare this", or similar. Local export only — no uploading.
 tools: Read, Glob, Bash
 ---
 
-# Export Chat
+# InstaShare
 
 Copies the current Claude Code session's raw JSONL transcript to a file in the user's working directory (or a path they specify), so it can be shared, archived, or pasted elsewhere.
 
