@@ -828,7 +828,6 @@ function render() {
     showEmptyState();
     return;
   }
-  const showMeta = viewMode === 'details';
   const search = $('#search').value.toLowerCase().trim();
   const out = [];
   const visibleNavIds = new Set();
@@ -856,22 +855,16 @@ function render() {
 
   for (const r of records) {
     if (isToolResultOnly(r)) continue;
+    if (METADATA_TYPES.has(r.type)) continue;
 
     if (r.type === 'assistant') {
       assistantBuffer.push(r);
       continue;
     }
 
-    if (METADATA_TYPES.has(r.type) && !showMeta) continue;
-
     flushAssistant();
 
-    let html;
-    if (METADATA_TYPES.has(r.type)) {
-      html = renderMetadataRow(r);
-    } else {
-      html = renderTurn(r);
-    }
+    const html = renderTurn(r);
     if (!html) continue;
     if (search) {
       const haystack = (html + ' ' + JSON.stringify(r)).toLowerCase();
