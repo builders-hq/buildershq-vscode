@@ -174,19 +174,19 @@ main.no-nav .nav-rail { display: none; }
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 .nav-item {
   display: flex;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
   border-left: 3px solid transparent;
   cursor: pointer;
   color: var(--text);
   text-decoration: none;
-  font-size: 12.5px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.3;
   transition: background 0.12s, border-color 0.12s;
 }
 .nav-item:hover { background: #f3f4f6; }
@@ -310,6 +310,25 @@ body.drag-over .dropzone-text { color: var(--user); }
 .text strong, .para strong { font-weight: 700; }
 .text em, .para em { font-style: italic; }
 .text del, .para del { color: var(--muted); }
+
+.md-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  width: auto;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+.md-table thead { background: var(--code-bg); }
+.md-table th, .md-table td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th { font-weight: 600; }
+.md-table td code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
 
 .cmd-pill {
   display: inline-flex; align-items: center; gap: 4px;
@@ -644,6 +663,34 @@ function renderInline(text) {
   return t;
 }
 
+function splitTableRow(line) {
+  let cells = line.split('|');
+  if (cells.length > 0 && cells[0].trim() === '') cells = cells.slice(1);
+  if (cells.length > 0 && cells[cells.length - 1].trim() === '') cells = cells.slice(0, -1);
+  return cells.map(c => c.trim());
+}
+
+function tryRenderTable(lines) {
+  if (lines.length < 2) return null;
+  if (!/\|/.test(lines[0])) return null;
+  if (!/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])) return null;
+  const headers = splitTableRow(lines[0]);
+  if (headers.length < 2) return null;
+  const rows = lines.slice(2).map(splitTableRow);
+  let html = '<table class="md-table"><thead><tr>';
+  for (const h of headers) html += `<th>${renderInline(h)}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += '<tr>';
+    for (let i = 0; i < headers.length; i++) {
+      html += `<td>${renderInline(row[i] || '')}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
 function renderText(text) {
   const parts = String(text).split(/```(\w*)\n?([\s\S]*?)```/g);
   let html = '';
@@ -654,6 +701,8 @@ function renderText(text) {
         const trimmed = block.trim();
         if (!trimmed) continue;
         const lines = trimmed.split('\n');
+        const tableHtml = tryRenderTable(lines);
+        if (tableHtml) { html += tableHtml; continue; }
         if (lines.length === 1) {
           const h = lines[0].match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
           if (h) {
@@ -1181,6 +1230,11 @@ $('#nav-list').addEventListener('click', (e) => {
   document.querySelectorAll('.nav-item').forEach((el) => {
     el.classList.toggle('active', el === item);
   });
+  const firstNavItem = $('#nav-list').querySelector('.nav-item');
+  if (item === firstNavItem) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
   const target = document.getElementById(id);
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
