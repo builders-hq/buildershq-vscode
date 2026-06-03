@@ -1,63 +1,57 @@
 ---
 name: instashare
-description: InstaShare — export the current Claude Code chat session to a local JSONL file. Claude Code persists every session under ~/.claude/projects/<project-slug>/<session-uuid>.jsonl; this skill locates that file and copies it somewhere accessible. Use when the user asks to "export this chat", "save this conversation", "share this session", "give me the chat as a file", "InstaShare this", or similar. Local export only — no uploading.
-tools: Read, Glob, Bash
+description: InstaShare — export the current Claude Code chat session to a local JSONL file. The active session is the most recently modified `~/.claude/projects/<slug>/<uuid>.jsonl` for the current working directory; this skill copies it to the cwd in one shell command. Use when the user asks to "export this chat", "save this conversation", "share this session", "give me the chat as a file", "InstaShare this", or similar. Local export only — no uploading.
+tools: Bash
 ---
 
 # InstaShare
 
-Copies the current Claude Code session's raw JSONL transcript to a file in the user's working directory (or a path they specify), so it can be shared, archived, or pasted elsewhere.
+Copy the current Claude Code session JSONL to a file in the user's cwd. **Do this in ONE shell call.** No verification reads, no separate Glob — the freshest `.jsonl` mtime in the project's directory is always the active session.
 
-## How Claude Code stores chats
+## Run exactly one of these
 
-Every session is persisted live to:
+Pick by platform. Substitute nothing — the script computes the slug itself.
 
+### Windows (PowerShell, via Bash tool's PowerShell mode or `pwsh -Command`)
+
+```powershell
+$cwd = (Get-Location).Path
+$slug = ($cwd -replace ':', '-' -replace '\\', '-').ToLower()
+$projDir = Join-Path $env:USERPROFILE ".claude\projects\$slug"
+$src = Get-ChildItem "$projDir\*.jsonl" -ErrorAction Stop |
+       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$dst = Join-Path $cwd "claude-chat-$($src.BaseName).jsonl"
+Copy-Item $src.FullName $dst -Force
+Write-Output $dst
 ```
-~/.claude/projects/<project-slug>/<session-uuid>.jsonl
+
+### macOS / Linux (Bash)
+
+```bash
+cwd="$(pwd)"
+slug=$(echo "$cwd" | sed 's#/#-#g' | tr '[:upper:]' '[:lower:]')
+slug=${slug#-}
+src=$(ls -t "$HOME/.claude/projects/$slug"/*.jsonl 2>/dev/null | head -1)
+[ -z "$src" ] && { echo "No session files in $HOME/.claude/projects/$slug" >&2; exit 1; }
+name=$(basename "$src")
+dst="$cwd/claude-chat-$name"
+cp "$src" "$dst"
+echo "$dst"
 ```
 
-- One JSON record per line: `user`, `assistant`, `attachment`, `system`, `file-history-snapshot`, `permission-mode`, `ai-title`, `bridge-session`, `last-prompt`.
-- Assistant turns include `text`, `tool_use`, and `thinking` content blocks. Tool results come back as `user` records with a `tool_result` content block.
-- The `<project-slug>` is derived from the cwd (e.g. `C:\appmakers\buildershq-vscode` → `c--appmakers-buildershq-vscode`). Capitalization is sometimes preserved, sometimes not — don't try to compute the slug; find it by directory listing instead.
-- Sub-agent (Task tool) transcripts live in `<session-uuid>/subagents/agent-*.jsonl` next to the main file.
-- The **active** session is the most recently modified `.jsonl` in the project's directory — it's being appended to in real time.
+The command prints the destination path on success. That path **is** the answer.
 
-## Steps
+## After the command runs
 
-### 1. Locate the current session file
+1. **Report the destination path** to the user (the printed line).
+2. **Optionally mention subagents.** Check `<src-dir>/<src-uuid-no-ext>/subagents/` — if it exists, tell the user how many `agent-*.jsonl` files are there and that they can be copied separately if wanted. Don't bundle them automatically; don't ask permission to skip.
+3. **One-line privacy note**: the export contains all tool inputs and outputs verbatim. Suggest reviewing before sharing.
 
-Use Glob to find `.jsonl` files under `~/.claude/projects/`. Glob returns results sorted by modification time, so the freshest entry is the live session.
+## Rules
 
-Strategy:
-- First try to match the project: glob `~/.claude/projects/*/` and pick the directory whose name corresponds to the current cwd (case-insensitive, with `:` and path separators collapsed to `-`).
-- Then glob `<that-dir>/*.jsonl` — the first result is the current session.
-- If the project directory cannot be identified, glob `~/.claude/projects/**/*.jsonl` and take the most recently modified file across all projects (that's almost certainly the current session).
-
-Confirm you have the right file by `Read`ing the first few lines and checking the embedded `cwd` and `sessionId` fields match the current environment.
-
-### 2. Determine the destination
-
-- Default: `<cwd>/claude-chat-<session-uuid>.jsonl` (the UUID is the source filename without `.jsonl`).
-- If the user provided a path or directory in their request, honor it.
-- Don't overwrite an existing file without asking.
-
-### 3. Copy the file
-
-Use Bash `cp` on Unix or `Copy-Item` on Windows. A plain file copy is sufficient — the JSONL is self-contained.
-
-### 4. Handle sub-agent transcripts
-
-Check whether `<session-uuid>/subagents/` exists alongside the main JSONL. If yes, tell the user how many `agent-*.jsonl` files are present and ask whether to bundle them too (copy the whole `subagents/` folder next to the exported main file).
-
-### 5. Report back
-
-Tell the user:
-- The absolute path of the exported file (and the subagents folder, if copied).
-- The session UUID and approximate line count, so they know what they have.
-- A one-line privacy reminder: the export contains tool inputs and outputs verbatim, including any file contents read during the session and any values surfaced by Bash commands. Suggest they review before sharing publicly.
-
-## What this skill does NOT do
-
-- It does not upload anywhere. No gists, no pastebins, no buildershq endpoint. Local file only.
-- It does not transform the content — the export is the raw JSONL exactly as Claude Code wrote it. (If the user asks for a "clean" or "readable" version, that's out of scope here; tell them and stop.)
-- It does not redact sensitive values. The user is responsible for reviewing before sharing.
+- **One shell call.** Do not run a separate Glob, Read, Test-Path, or Get-ChildItem to "verify" the file first. Trust the mtime sort.
+- **Do not guess slug case.** The script lowercases — Windows filesystem is case-insensitive, so this matches whichever case the directory was created with.
+- **Do not check before overwriting.** If a stale `claude-chat-<uuid>.jsonl` already exists in cwd from a previous run of this skill, overwriting it with a fresh copy of the same session is exactly what the user wants.
+- **Do not transform the content.** The export is the raw JSONL exactly as Claude Code wrote it. If the user asks for a "clean" or "readable" version, tell them that's out of scope and stop.
+- **Do not redact.** The user is responsible for reviewing before sharing.
+- **Do not upload.** No gists, no pastebins, no buildershq endpoint. Local file only.
