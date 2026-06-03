@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude Session Viewer</title>
+<style>
+:root {
+  --bg: #fafafa;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #111827;
+  --muted: #6b7280;
+  --user: #4f46e5;
+  --assistant: #059669;
+  --tool: #b45309;
+  --system: #6b7280;
+  --code-bg: #f6f7f9;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.02);
+  --nav-width: 240px;
+  --header-offset: 116px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--user); }
+code, pre, .mono { font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; }
+
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(250,250,250,0.92);
+  backdrop-filter: saturate(180%) blur(10px);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+}
+.header-row {
+  display: flex; gap: 12px; align-items: center;
+  max-width: 1040px; margin: 0 auto;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: 15px; margin: 0; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.title-meta { color: var(--muted); font-weight: 400; font-size: 13px; }
+.spacer { flex: 1; }
+
+input[type="search"] {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 220px;
+  background: white;
+  font-family: inherit;
+}
+input[type="search"]:focus { outline: 2px solid var(--user); outline-offset: -1px; }
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: white;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+}
+.btn:hover { background: #f3f4f6; }
+.btn-primary { background: #111827; color: white; border-color: #111827; }
+.btn-primary:hover { background: #1f2937; }
+
+.toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text);
+  cursor: pointer; user-select: none;
+}
+
+.stats {
+  max-width: 1040px; margin: 8px auto 0;
+  display: flex; gap: 16px;
+  font-size: 12px; color: var(--muted);
+  flex-wrap: wrap;
+}
+.stat strong { color: var(--text); font-weight: 600; }
+
+main {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 28px 24px 80px;
+  display: grid;
+  grid-template-columns: var(--nav-width) 1fr;
+  gap: 32px;
+  align-items: start;
+}
+main.no-nav { grid-template-columns: 1fr; }
+main.no-nav .nav-rail { display: none; }
+
+.nav-rail {
+  position: sticky;
+  top: var(--header-offset);
+  max-height: calc(100vh - var(--header-offset) - 16px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.nav-rail::-webkit-scrollbar { width: 6px; }
+.nav-rail::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.nav-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 0 0 10px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-item {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12.5px;
+  line-height: 1.4;
+  transition: background 0.12s, border-color 0.12s;
+}
+.nav-item:hover { background: #f3f4f6; }
+.nav-item.active {
+  background: #eef2ff;
+  border-left-color: var(--user);
+  font-weight: 500;
+}
+.nav-item.dimmed { opacity: 0.35; }
+.nav-num {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 18px;
+  font-size: 11.5px;
+}
+.nav-item.active .nav-num { color: var(--user); font-weight: 600; }
+.nav-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+.empty-state h2 { color: var(--text); margin: 0 0 8px; font-size: 22px; font-weight: 600; }
+.empty-state p { margin: 0 0 16px; }
+.empty-state code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 60px 20px;
+  margin: 28px auto 0;
+  max-width: 520px;
+  transition: all 0.15s;
+  background: white;
+}
+body.drag-over .dropzone { border-color: var(--user); background: #eef2ff; }
+body.drag-over .dropzone-text { color: var(--user); }
+
+.turn { margin-bottom: 20px; scroll-margin-top: calc(var(--header-offset) + 8px); }
+.turn-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px; color: var(--muted);
+  flex-wrap: wrap;
+}
+.role {
+  font-weight: 600; font-size: 12px;
+  padding: 2px 8px; border-radius: 4px;
+  letter-spacing: 0.1px;
+}
+.role.user { color: var(--user); background: #eef2ff; }
+.role.assistant { color: var(--assistant); background: #ecfdf5; }
+.role.system { color: var(--system); background: #f3f4f6; }
+.timestamp { font-variant-numeric: tabular-nums; }
+.sidechain-badge {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;
+  background: #fef3c7; color: #92400e;
+  padding: 1px 6px; border-radius: 3px; font-weight: 600;
+}
+
+.content {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  box-shadow: var(--shadow);
+}
+.content.user-msg { border-left: 3px solid var(--user); }
+.content.assistant-msg { border-left: 3px solid var(--assistant); }
+.content.system-msg {
+  border-left: 3px solid var(--system); background: #f9fafb;
+  color: var(--muted); font-size: 13px;
+}
+
+.text { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+.text + .text { margin-top: 8px; }
+.text code {
+  background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
+  font-size: 12.5px; border: 1px solid var(--border);
+}
+
+pre.code-block {
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  max-height: 520px;
+}
+pre.code-block code { background: none; border: none; padding: 0; white-space: pre; }
+
+.thinking {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 4px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: #78350f;
+}
+.thinking summary {
+  cursor: pointer; font-weight: 600; padding: 6px 0;
+  list-style: none;
+}
+.thinking summary::-webkit-details-marker { display: none; }
+.thinking summary::before { content: "▸ "; color: #b45309; }
+.thinking[open] summary::before { content: "▾ "; }
+.thinking .text { margin: 6px 0 8px; }
+
+.tool-call {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 10px 0;
+  background: white;
+  overflow: hidden;
+}
+.tool-call summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.tool-call summary::-webkit-details-marker { display: none; }
+.tool-call summary:hover { background: #f9fafb; }
+.tool-call .chevron {
+  color: var(--muted);
+  transition: transform 0.15s;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.tool-call[open] .chevron { transform: rotate(90deg); }
+.tool-name {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: #fef3c7; color: #92400e;
+  flex-shrink: 0;
+}
+.tool-name.bash { background: #dcfce7; color: #166534; }
+.tool-name.read, .tool-name.glob, .tool-name.grep { background: #dbeafe; color: #1e40af; }
+.tool-name.edit, .tool-name.write { background: #fce7f3; color: #9d174d; }
+.tool-name.task, .tool-name.agent { background: #ede9fe; color: #5b21b6; }
+.tool-name.webfetch, .tool-name.websearch { background: #fef3c7; color: #92400e; }
+.tool-summary {
+  color: var(--muted);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-body {
+  border-top: 1px solid var(--border);
+  padding: 14px;
+  background: #fcfcfd;
+}
+.tool-body h4 {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--muted); margin: 0 0 6px; font-weight: 600;
+}
+.tool-body h4:not(:first-child) { margin-top: 14px; }
+.tool-body pre.code-block { font-size: 12px; background: white; }
+
+.metadata-card {
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin: 6px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  display: flex; gap: 10px; align-items: center;
+}
+.metadata-card .meta-type {
+  background: var(--border); color: var(--text);
+  padding: 1px 6px; border-radius: 3px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.usage-badge {
+  display: inline-flex; gap: 8px;
+  font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.model-tag {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--muted);
+}
+
+@media (max-width: 920px) {
+  main { grid-template-columns: 1fr; gap: 16px; }
+  .nav-rail { display: none; }
+}
+@media (max-width: 640px) {
+  main { padding: 16px; }
+  header { padding: 10px 16px; }
+  input[type="search"] { width: 100%; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <h1>
+      <span>Claude Session Viewer</span>
+      <span id="session-title" class="title-meta"></span>
+    </h1>
+    <div class="spacer"></div>
+    <input type="search" id="search" placeholder="Search…" disabled>
+    <label class="toggle"><input type="checkbox" id="toggle-meta"> Show metadata</label>
+    <button class="btn btn-primary" id="load-btn">Load file</button>
+    <input type="file" id="file-input" accept=".jsonl,.json,.txt" style="display:none">
+  </div>
+  <div class="stats" id="stats" hidden></div>
+</header>
+
+<main class="no-nav" id="main">
+  <aside class="nav-rail" id="nav-rail" aria-label="Message navigation">
+    <h3 class="nav-title">Messages</h3>
+    <ol class="nav-list" id="nav-list"></ol>
+  </aside>
+  <div id="content"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+let records = [];
+let toolResults = {};
+let userTurns = [];
+let scrollObserver = null;
+
+function parseJsonl(text) {
+  return text.split(/\r?\n/).filter(l => l.trim().length).map((line, i) => {
+    try { return JSON.parse(line); }
+    catch { return { __parseError: true, line: i + 1, raw: line }; }
+  });
+}
+
+function buildToolResultMap(records) {
+  const map = {};
+  for (const r of records) {
+    if (r.type === 'user' && Array.isArray(r.message?.content)) {
+      for (const block of r.message.content) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          map[block.tool_use_id] = block;
+        }
+      }
+    }
+  }
+  return map;
+}
+
+const METADATA_TYPES = new Set([
+  'permission-mode', 'bridge-session', 'ai-title', 'last-prompt',
+  'file-history-snapshot', 'queue-operation', 'attachment', 'system'
+]);
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      month: 'short', day: 'numeric'
+    });
+  } catch { return ''; }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
+function renderText(text) {
+  const parts = String(text).split(/```(\w*)\n?([\s\S]*?)```/g);
+  let html = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 3 === 0) {
+      let t = escapeHtml(parts[i]);
+      t = t.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+      t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+      if (t) html += t;
+    } else if (i % 3 === 2) {
+      html += `<pre class="code-block"><code>${escapeHtml(parts[i])}</code></pre>`;
+    }
+  }
+  return html;
+}
+
+function summarizeToolInput(name, input) {
+  if (!input || typeof input !== 'object') return '';
+  const n = (name || '').toLowerCase();
+  if (n === 'bash' || n === 'powershell') return input.command || input.description || '';
+  if (n === 'read' || n === 'edit' || n === 'write' || n === 'notebookedit') return input.file_path || '';
+  if (n === 'glob' || n === 'grep') return (input.pattern || '') + (input.path ? ` in ${input.path}` : '');
+  if (n === 'webfetch') return input.url || '';
+  if (n === 'websearch') return input.query || '';
+  if (n === 'task' || n === 'agent') return input.description || '';
+  if (n === 'askuserquestion') {
+    const q = input.questions?.[0]?.question;
+    return q || '';
+  }
+  const keys = Object.keys(input);
+  if (keys.length === 0) return '';
+  const first = keys[0];
+  const v = input[first];
+  return typeof v === 'string' ? `${first}: ${v.slice(0, 100)}` : `${first}: …`;
+}
+
+function renderToolResultBlock(toolUseId) {
+  const result = toolResults[toolUseId];
+  if (!result) return '<em style="color:var(--muted);font-size:12px">No result captured</em>';
+  const content = result.content;
+  if (typeof content === 'string') {
+    return `<pre class="code-block"><code>${escapeHtml(content)}</code></pre>`;
+  }
+  if (Array.isArray(content)) {
+    return content.map(b => {
+      if (b.type === 'text') return `<pre class="code-block"><code>${escapeHtml(b.text)}</code></pre>`;
+      if (b.type === 'image') return `<div style="color:var(--muted);font-size:12px;padding:8px">[image content]</div>`;
+      return `<pre class="code-block"><code>${escapeHtml(JSON.stringify(b, null, 2))}</code></pre>`;
+    }).join('');
+  }
+  return `<pre class="code-block"><code>${escapeHtml(JSON.stringify(content, null, 2))}</code></pre>`;
+}
+
+function renderAssistantContent(content) {
+  if (!Array.isArray(content)) return `<div class="text">${renderText(String(content ?? ''))}</div>`;
+  let html = '';
+  for (const block of content) {
+    if (block.type === 'text') {
+      html += `<div class="text">${renderText(block.text || '')}</div>`;
+    } else if (block.type === 'thinking') {
+      const t = block.thinking || block.text || '';
+      html += `<details class="thinking"><summary>Thinking</summary><div class="text">${escapeHtml(t)}</div></details>`;
+    } else if (block.type === 'tool_use') {
+      const summary = summarizeToolInput(block.name, block.input);
+      const inputJson = JSON.stringify(block.input ?? {}, null, 2);
+      const cls = (block.name || '').toLowerCase().replace(/[^a-z]/g, '');
+      html += `
+        <details class="tool-call">
+          <summary>
+            <span class="chevron">▶</span>
+            <span class="tool-name ${cls}">${escapeHtml(block.name || 'tool')}</span>
+            <span class="tool-summary">${escapeHtml(summary)}</span>
+          </summary>
+          <div class="tool-body">
+            <h4>Input</h4>
+            <pre class="code-block"><code>${escapeHtml(inputJson)}</code></pre>
+            <h4>Result</h4>
+            ${renderToolResultBlock(block.id)}
+          </div>
+        </details>
+      `;
+    }
+  }
+  return html;
+}
+
+function renderUserContent(content) {
+  if (typeof content === 'string') return `<div class="text">${renderText(content)}</div>`;
+  return '';
+}
+
+function renderTurn(r) {
+  const ts = fmtTime(r.timestamp);
+  const sidechain = r.isSidechain ? '<span class="sidechain-badge">sub-agent</span>' : '';
+  if (r.type === 'user' && typeof r.message?.content === 'string') {
+    const idx = r.__turnIndex;
+    const idAttr = idx != null ? `id="turn-${idx}" data-turn-index="${idx}"` : '';
+    return `
+      <div class="turn" data-role="user" ${idAttr}>
+        <div class="turn-header">
+          <span class="role user">User</span>
+          ${sidechain}
+          <span class="timestamp">${ts}</span>
+        </div>
+        <div class="content user-msg">${renderUserContent(r.message.content)}</div>
+      </div>
+    `;
+  }
+  if (r.type === 'assistant') {
+    const model = r.message?.model || '';
+    const usage = r.message?.usage;
+    let usageBadge = '';
+    if (usage) {
+      const out = usage.output_tokens ?? 0;
+      const inT = (usage.input_tokens ?? 0)
+        + (usage.cache_creation_input_tokens ?? 0)
+        + (usage.cache_read_input_tokens ?? 0);
+      usageBadge = `<span class="usage-badge" title="input tokens · output tokens">in ${inT.toLocaleString()} · out ${out.toLocaleString()}</span>`;
+    }
+    return `
+      <div class="turn" data-role="assistant">
+        <div class="turn-header">
+          <span class="role assistant">Assistant</span>
+          ${sidechain}
+          <span class="timestamp">${ts}</span>
+          ${model ? `<span class="model-tag">${escapeHtml(model)}</span>` : ''}
+          ${usageBadge}
+        </div>
+        <div class="content assistant-msg">${renderAssistantContent(r.message?.content)}</div>
+      </div>
+    `;
+  }
+  return '';
+}
+
+function renderMetadataRow(r) {
+  let label = r.type;
+  let detail = '';
+  if (r.type === 'attachment') {
+    label = `attachment`;
+    detail = r.attachment?.type || '';
+  } else if (r.type === 'system') {
+    detail = String(r.content || '').slice(0, 240);
+  } else if (r.type === 'ai-title') {
+    detail = r.aiTitle || '';
+  } else if (r.type === 'last-prompt') {
+    detail = String(r.lastPrompt || '').slice(0, 240);
+  } else if (r.type === 'permission-mode') {
+    detail = r.permissionMode || '';
+  } else if (r.type === 'bridge-session') {
+    detail = r.bridgeSessionId || '';
+  }
+  return `<div class="metadata-card"><span class="meta-type">${escapeHtml(label)}</span>${detail ? `<span>${escapeHtml(detail)}</span>` : ''}</div>`;
+}
+
+function isToolResultOnly(r) {
+  return r.type === 'user'
+    && Array.isArray(r.message?.content)
+    && r.message.content.length > 0
+    && r.message.content.every(b => b.type === 'tool_result');
+}
+
+function render() {
+  if (records.length === 0) {
+    showEmptyState();
+    return;
+  }
+  const showMeta = $('#toggle-meta').checked;
+  const search = $('#search').value.toLowerCase().trim();
+  const out = [];
+  const visibleTurnIndices = new Set();
+  for (const r of records) {
+    if (isToolResultOnly(r)) continue;
+    let html;
+    if (METADATA_TYPES.has(r.type)) {
+      if (!showMeta) continue;
+      html = renderMetadataRow(r);
+    } else {
+      html = renderTurn(r);
+    }
+    if (!html) continue;
+    if (search) {
+      const haystack = (html + ' ' + JSON.stringify(r)).toLowerCase();
+      if (!haystack.includes(search)) continue;
+    }
+    if (r.__turnIndex != null) visibleTurnIndices.add(r.__turnIndex);
+    out.push(html);
+  }
+  $('#content').innerHTML = out.length
+    ? out.join('')
+    : `<div class="empty-state"><h2>No matching records</h2><p>Try a different search term or toggle metadata.</p></div>`;
+  updateNavDim(visibleTurnIndices, !!search);
+  requestAnimationFrame(setupScrollSpy);
+}
+
+function buildNav() {
+  let idx = 0;
+  userTurns = [];
+  for (const r of records) {
+    if (r.type === 'user' && typeof r.message?.content === 'string') {
+      r.__turnIndex = idx;
+      const text = r.message.content.trim();
+      const preview = text.split(/\r?\n/)[0].slice(0, 100) || text.slice(0, 100);
+      userTurns.push({ index: idx, preview, timestamp: r.timestamp });
+      idx++;
+    }
+  }
+  const html = userTurns.map(t => `
+    <li><a href="#turn-${t.index}" class="nav-item" data-turn-index="${t.index}">
+      <span class="nav-num">${t.index + 1}</span>
+      <span class="nav-preview">${escapeHtml(t.preview)}</span>
+    </a></li>
+  `).join('');
+  $('#nav-list').innerHTML = html;
+  $('#main').classList.toggle('no-nav', userTurns.length === 0);
+}
+
+function updateNavDim(visibleSet, searchActive) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const idx = Number(el.dataset.turnIndex);
+    const dimmed = searchActive && !visibleSet.has(idx);
+    el.classList.toggle('dimmed', dimmed);
+  });
+}
+
+function setupScrollSpy() {
+  if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+  if (!('IntersectionObserver' in window)) return;
+  const turnEls = Array.from(document.querySelectorAll('.turn[data-turn-index]'));
+  if (turnEls.length === 0) return;
+
+  const setActive = (idx) => {
+    document.querySelectorAll('.nav-item').forEach(el => {
+      const active = Number(el.dataset.turnIndex) === idx;
+      el.classList.toggle('active', active);
+      if (active) {
+        const rail = $('#nav-rail');
+        const r = el.getBoundingClientRect();
+        const rr = rail.getBoundingClientRect();
+        if (r.top < rr.top || r.bottom > rr.bottom) {
+          el.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    });
+  };
+
+  scrollObserver = new IntersectionObserver((entries) => {
+    entries.forEach(e => { e.target.__intersecting = e.isIntersecting; });
+    for (const el of turnEls) {
+      if (el.__intersecting) {
+        setActive(Number(el.dataset.turnIndex));
+        return;
+      }
+    }
+  }, { rootMargin: '-110px 0px -60% 0px', threshold: 0 });
+
+  turnEls.forEach(el => scrollObserver.observe(el));
+}
+
+function showEmptyState() {
+  $('#main').classList.add('no-nav');
+  $('#nav-list').innerHTML = '';
+  $('#content').innerHTML = `
+    <div class="empty-state">
+      <h2>Drop a Claude session file</h2>
+      <p>Or click <strong>Load file</strong>. Sessions live at
+        <code>~/.claude/projects/&lt;slug&gt;/&lt;uuid&gt;.jsonl</code></p>
+      <div class="dropzone">
+        <div class="dropzone-text">Drag &amp; drop a <strong>.jsonl</strong> file here</div>
+      </div>
+    </div>
+  `;
+}
+
+function loadRecords(text) {
+  records = parseJsonl(text);
+  toolResults = buildToolResultMap(records);
+  buildNav();
+
+  const lastTitle = [...records].reverse().find(r => r.type === 'ai-title')?.aiTitle;
+  const firstConv = records.find(r => r.sessionId) || {};
+  const sessionId = firstConv.sessionId || '';
+  const cwd = firstConv.cwd || records.find(r => r.cwd)?.cwd || '';
+  const gitBranch = records.find(r => r.gitBranch)?.gitBranch || '';
+  const slug = records.find(r => r.slug)?.slug || '';
+
+  const titleParts = [];
+  if (lastTitle) titleParts.push(`"${lastTitle}"`);
+  if (slug) titleParts.push(slug);
+  if (sessionId) titleParts.push(sessionId.slice(0, 8));
+  $('#session-title').textContent = titleParts.length ? '· ' + titleParts.join(' · ') : '';
+  document.title = lastTitle ? `${lastTitle} — Claude Viewer` : 'Claude Session Viewer';
+
+  const userTurns = records.filter(r => r.type === 'user' && typeof r.message?.content === 'string').length;
+  const assistantTurns = records.filter(r => r.type === 'assistant').length;
+  const toolCalls = records.reduce((acc, r) => {
+    if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+      return acc + r.message.content.filter(b => b.type === 'tool_use').length;
+    }
+    return acc;
+  }, 0);
+  const metaCount = records.filter(r => METADATA_TYPES.has(r.type)).length;
+
+  const statsEl = $('#stats');
+  statsEl.hidden = false;
+  statsEl.innerHTML = `
+    <span class="stat"><strong>${records.length.toLocaleString()}</strong> records</span>
+    <span class="stat"><strong>${userTurns}</strong> user turns</span>
+    <span class="stat"><strong>${assistantTurns}</strong> assistant replies</span>
+    <span class="stat"><strong>${toolCalls}</strong> tool calls</span>
+    <span class="stat"><strong>${metaCount}</strong> metadata records</span>
+    ${cwd ? `<span class="stat">cwd: <strong>${escapeHtml(cwd)}</strong></span>` : ''}
+    ${gitBranch ? `<span class="stat">branch: <strong>${escapeHtml(gitBranch)}</strong></span>` : ''}
+  `;
+
+  $('#search').disabled = false;
+  render();
+}
+
+// File loading
+$('#load-btn').addEventListener('click', () => $('#file-input').click());
+$('#file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (file) loadRecords(await file.text());
+});
+
+// Drag & drop on whole page
+['dragenter', 'dragover'].forEach(ev => {
+  document.body.addEventListener(ev, (e) => {
+    e.preventDefault();
+    document.body.classList.add('drag-over');
+  });
+});
+['dragleave', 'drop'].forEach(ev => {
+  document.body.addEventListener(ev, (e) => {
+    e.preventDefault();
+    if (ev === 'drop' || e.target === document.body || e.target === document.documentElement) {
+      document.body.classList.remove('drag-over');
+    }
+  });
+});
+document.body.addEventListener('drop', async (e) => {
+  const file = e.dataTransfer.files?.[0];
+  if (file) loadRecords(await file.text());
+});
+
+$('#toggle-meta').addEventListener('change', render);
+$('#search').addEventListener('input', render);
+
+$('#nav-list').addEventListener('click', (e) => {
+  const item = e.target.closest('.nav-item');
+  if (!item || item.classList.contains('dimmed')) return;
+  e.preventDefault();
+  const idx = item.dataset.turnIndex;
+  const turn = document.querySelector(`.turn[data-turn-index="${idx}"]`);
+  if (turn) turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+showEmptyState();
+</script>
+</body>
+</html>
