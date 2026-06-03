@@ -932,8 +932,11 @@ function updateNavDim(visibleSet, searchActive) {
 }
 
 function setupScrollSpy() {
-  if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
-  if (!('IntersectionObserver' in window)) return;
+  if (scrollObserver) {
+    window.removeEventListener('scroll', scrollObserver, { passive: true });
+    window.removeEventListener('resize', scrollObserver);
+    scrollObserver = null;
+  }
   const els = Array.from(document.querySelectorAll('[data-nav-id]'));
   if (els.length === 0) return;
 
@@ -952,17 +955,29 @@ function setupScrollSpy() {
     });
   };
 
-  scrollObserver = new IntersectionObserver((entries) => {
-    entries.forEach(e => { e.target.__intersecting = e.isIntersecting; });
+  let rafScheduled = false;
+  const update = () => {
+    rafScheduled = false;
+    const offset = 130;
+    let activeId = els[0].dataset.navId;
     for (const el of els) {
-      if (el.__intersecting) {
-        setActive(el.dataset.navId);
-        return;
-      }
+      const top = el.getBoundingClientRect().top;
+      if (top <= offset) activeId = el.dataset.navId;
+      else break;
     }
-  }, { rootMargin: '-110px 0px -60% 0px', threshold: 0 });
+    setActive(activeId);
+  };
 
-  els.forEach(el => scrollObserver.observe(el));
+  const handler = () => {
+    if (rafScheduled) return;
+    rafScheduled = true;
+    requestAnimationFrame(update);
+  };
+
+  scrollObserver = handler;
+  window.addEventListener('scroll', handler, { passive: true });
+  window.addEventListener('resize', handler, { passive: true });
+  update();
 }
 
 function showEmptyState() {
