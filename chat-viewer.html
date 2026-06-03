@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claude Session Viewer</title>
+<link rel="icon" type="image/png" href="chat-viewer-icon.png">
 <style>
 :root {
   --bg: #fafafa;
@@ -50,6 +51,11 @@ h1 {
   font-size: 15px; margin: 0; font-weight: 600;
   display: flex; align-items: center; gap: 8px;
 }
+.app-icon {
+  width: 28px; height: 28px;
+  display: block;
+  flex-shrink: 0;
+}
 .title-meta { color: var(--muted); font-weight: 400; font-size: 13px; }
 .spacer { flex: 1; }
 
@@ -92,45 +98,43 @@ input[type="search"]:focus { outline: 2px solid var(--user); outline-offset: -1p
 }
 .stat strong { color: var(--text); font-weight: 600; }
 
-.filters {
-  max-width: 1040px; margin: 8px auto 0;
-  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  font-size: 12px;
-}
-.filters-label { color: var(--muted); margin-right: 2px; font-size: 11.5px; }
-.filter-pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 9px;
+.view-switcher {
+  display: inline-flex;
+  background: #f3f4f6;
   border-radius: 999px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-size: 11.5px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  position: relative;
+}
+.seg {
+  border: none;
+  background: transparent;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
   font-weight: 500;
-  user-select: none;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
   font-family: inherit;
-  line-height: 1.5;
-  transition: opacity 0.12s, background 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
 }
-.filter-pill:hover { filter: brightness(0.97); }
-.filter-pill .pill-count {
-  font-variant-numeric: tabular-nums;
-  font-weight: 400;
-  opacity: 0.8;
-  font-size: 11px;
+.seg:hover { color: var(--text); }
+.seg.active {
+  background: white;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
 }
-.filter-pill { background: #fef3c7; color: #92400e; }
-.filter-pill[data-tool-cls="bash"], .filter-pill[data-tool-cls="powershell"] { background: #dcfce7; color: #166534; }
-.filter-pill[data-tool-cls="read"], .filter-pill[data-tool-cls="glob"], .filter-pill[data-tool-cls="grep"] { background: #dbeafe; color: #1e40af; }
-.filter-pill[data-tool-cls="edit"], .filter-pill[data-tool-cls="write"], .filter-pill[data-tool-cls="notebookedit"] { background: #fce7f3; color: #9d174d; }
-.filter-pill[data-tool-cls="task"], .filter-pill[data-tool-cls="agent"] { background: #ede9fe; color: #5b21b6; }
-.filter-pill[data-tool-cls="webfetch"], .filter-pill[data-tool-cls="websearch"] { background: #fef3c7; color: #92400e; }
-.filter-pill.off {
-  background: transparent !important;
-  color: var(--muted) !important;
-  border-color: var(--border-strong);
-  text-decoration: line-through;
-  text-decoration-color: var(--border-strong);
+.seg-icon {
+  display: inline-flex;
+  width: 12px; height: 12px;
+  color: currentColor;
+  opacity: 0.7;
 }
+.seg.active .seg-icon { opacity: 1; }
 
 main {
   max-width: 1320px;
@@ -191,15 +195,26 @@ main.no-nav .nav-rail { display: none; }
   border-left-color: var(--user);
   font-weight: 500;
 }
-.nav-item.dimmed { opacity: 0.35; }
+.nav-item.dimmed { opacity: 0.35; pointer-events: none; }
 .nav-num {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   min-width: 18px;
   font-size: 11.5px;
+  text-align: center;
 }
 .nav-item.active .nav-num { color: var(--user); font-weight: 600; }
+.nav-item.question .nav-num {
+  color: #6366f1;
+  font-weight: 700;
+  font-size: 13px;
+}
+.nav-item.question.active {
+  background: #eef2ff;
+  border-left-color: #6366f1;
+}
+.nav-item.question.active .nav-num { color: #4338ca; }
 .nav-preview {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -225,7 +240,7 @@ main.no-nav .nav-rail { display: none; }
 body.drag-over .dropzone { border-color: var(--user); background: #eef2ff; }
 body.drag-over .dropzone-text { color: var(--user); }
 
-.turn { margin-bottom: 20px; scroll-margin-top: calc(var(--header-offset) + 8px); }
+.turn { margin-bottom: 14px; scroll-margin-top: calc(var(--header-offset) + 8px); }
 .turn-header {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 6px;
@@ -251,7 +266,7 @@ body.drag-over .dropzone-text { color: var(--user); }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   box-shadow: var(--shadow);
 }
 .content.user-msg { border-left: 3px solid var(--user); }
@@ -261,19 +276,27 @@ body.drag-over .dropzone-text { color: var(--user); }
   color: var(--muted); font-size: 13px;
 }
 
-.text { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
-.text + .text { margin-top: 8px; }
+.text { word-wrap: break-word; overflow-wrap: anywhere; }
+.text + .text { margin-top: 6px; }
 .text code {
   background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
   font-size: 12.5px; border: 1px solid var(--border);
 }
+.para {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.para + .para { margin-top: 6px; }
+.para + pre.code-block, pre.code-block + .para { margin-top: 6px; }
 
 pre.code-block {
   background: var(--code-bg);
   border-radius: 6px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   overflow: auto;
-  margin: 8px 0;
+  margin: 6px 0;
   border: 1px solid var(--border);
   max-height: 520px;
 }
@@ -493,17 +516,20 @@ pre.code-block code { background: none; border: none; padding: 0; white-space: p
 <header>
   <div class="header-row">
     <h1>
+      <img src="chat-viewer-icon.png" alt="" class="app-icon">
       <span>Claude Session Viewer</span>
       <span id="session-title" class="title-meta"></span>
     </h1>
     <div class="spacer"></div>
     <input type="search" id="search" placeholder="Search…" disabled>
-    <label class="toggle"><input type="checkbox" id="toggle-meta"> Show metadata</label>
+    <div class="view-switcher" id="view-switcher" role="tablist" aria-label="View mode">
+      <button class="seg" data-view="conversation" role="tab">Conversation</button>
+      <button class="seg" data-view="details" role="tab">Details</button>
+    </div>
     <button class="btn btn-primary" id="load-btn">Load file</button>
     <input type="file" id="file-input" accept=".jsonl,.json,.txt" style="display:none">
   </div>
   <div class="stats" id="stats" hidden></div>
-  <div class="filters" id="filters" hidden></div>
 </header>
 
 <main class="no-nav" id="main">
@@ -519,19 +545,15 @@ const $ = (s) => document.querySelector(s);
 
 let records = [];
 let toolResults = {};
-let userTurns = [];
+let navItems = [];
 let scrollObserver = null;
-let hiddenTools = new Set();
+let viewMode = 'conversation';
 
-const TOOL_FILTER_KEY = 'claude-viewer:hidden-tools-v1';
+const VIEW_MODE_KEY = 'claude-viewer:view-mode-v1';
 try {
-  const saved = localStorage.getItem(TOOL_FILTER_KEY);
-  if (saved) hiddenTools = new Set(JSON.parse(saved));
+  const saved = localStorage.getItem(VIEW_MODE_KEY);
+  if (saved === 'details' || saved === 'conversation') viewMode = saved;
 } catch {}
-
-function persistHiddenTools() {
-  try { localStorage.setItem(TOOL_FILTER_KEY, JSON.stringify([...hiddenTools])); } catch {}
-}
 
 function parseJsonl(text) {
   return text.split(/\r?\n/).filter(l => l.trim().length).map((line, i) => {
@@ -580,10 +602,14 @@ function renderText(text) {
   let html = '';
   for (let i = 0; i < parts.length; i++) {
     if (i % 3 === 0) {
-      let t = escapeHtml(parts[i]);
-      t = t.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-      t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-      if (t) html += t;
+      const paras = String(parts[i]).split(/\n\n+/);
+      for (const p of paras) {
+        if (!p.trim()) continue;
+        let t = escapeHtml(p);
+        t = t.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+        t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+        html += `<p class="para">${t}</p>`;
+      }
     } else if (i % 3 === 2) {
       html += `<pre class="code-block"><code>${escapeHtml(parts[i])}</code></pre>`;
     }
@@ -639,8 +665,10 @@ function renderAskQuestion(block) {
   if (questions.length === 0) return '';
   const answers = parseAskAnswers(getToolResultText(block.id));
   const hasAnswers = Object.keys(answers).length > 0;
+  const navId = block.__navId || '';
+  const idAttr = navId ? `id="${navId}" data-nav-id="${navId}"` : '';
 
-  let html = '<div class="ask-card">';
+  let html = `<div class="ask-card" ${idAttr}>`;
   html += '<div class="ask-header"><span class="ask-icon">?</span><span>Question</span></div>';
 
   for (const q of questions) {
@@ -705,11 +733,11 @@ function renderAssistantContent(content) {
     } else if (block.type === 'thinking') {
       continue;
     } else if (block.type === 'tool_use') {
-      if (hiddenTools.has(block.name)) continue;
       if (block.name === 'AskUserQuestion') {
         html += renderAskQuestion(block);
         continue;
       }
+      if (viewMode === 'conversation') continue;
       const summary = summarizeToolInput(block.name, block.input);
       const inputJson = JSON.stringify(block.input ?? {}, null, 2);
       const cls = (block.name || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -742,8 +770,8 @@ function renderTurn(r) {
   const ts = fmtTime(r.timestamp);
   const sidechain = r.isSidechain ? '<span class="sidechain-badge">sub-agent</span>' : '';
   if (r.type === 'user' && typeof r.message?.content === 'string') {
-    const idx = r.__turnIndex;
-    const idAttr = idx != null ? `id="turn-${idx}" data-turn-index="${idx}"` : '';
+    const navId = r.__navId;
+    const idAttr = navId ? `id="${navId}" data-nav-id="${navId}"` : '';
     return `
       <div class="turn" data-role="user" ${idAttr}>
         <div class="turn-header">
@@ -800,10 +828,10 @@ function render() {
     showEmptyState();
     return;
   }
-  const showMeta = $('#toggle-meta').checked;
+  const showMeta = viewMode === 'details';
   const search = $('#search').value.toLowerCase().trim();
   const out = [];
-  const visibleTurnIndices = new Set();
+  const visibleNavIds = new Set();
 
   let assistantBuffer = [];
   const flushAssistant = () => {
@@ -816,6 +844,13 @@ function render() {
       const haystack = (html + ' ' + JSON.stringify(group.map(g => g.message?.content))).toLowerCase();
       if (!haystack.includes(search)) return;
     }
+    for (const g of group) {
+      if (Array.isArray(g.message?.content)) {
+        for (const b of g.message.content) {
+          if (b.__navId) visibleNavIds.add(b.__navId);
+        }
+      }
+    }
     out.push(html);
   };
 
@@ -827,7 +862,6 @@ function render() {
       continue;
     }
 
-    // Skip hidden metadata before flushing, so they don't split assistant groups
     if (METADATA_TYPES.has(r.type) && !showMeta) continue;
 
     flushAssistant();
@@ -843,64 +877,56 @@ function render() {
       const haystack = (html + ' ' + JSON.stringify(r)).toLowerCase();
       if (!haystack.includes(search)) continue;
     }
-    if (r.__turnIndex != null) visibleTurnIndices.add(r.__turnIndex);
+    if (r.__navId) visibleNavIds.add(r.__navId);
     out.push(html);
   }
   flushAssistant();
 
   $('#content').innerHTML = out.length
     ? out.join('')
-    : `<div class="empty-state"><h2>No matching records</h2><p>Try a different search term or toggle metadata.</p></div>`;
-  updateNavDim(visibleTurnIndices, !!search);
+    : `<div class="empty-state"><h2>No matching records</h2><p>Try a different search term or switch to Details view.</p></div>`;
+  updateNavDim(visibleNavIds, !!search);
   requestAnimationFrame(setupScrollSpy);
 }
 
-function buildFilters() {
-  const counts = new Map();
+function buildNav() {
+  let userIdx = 0;
+  let askIdx = 0;
+  navItems = [];
   for (const r of records) {
-    if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+    if (r.type === 'user' && typeof r.message?.content === 'string') {
+      const navId = `turn-${userIdx}`;
+      r.__navId = navId;
+      const text = r.message.content.trim();
+      const preview = text.split(/\r?\n/)[0].slice(0, 100) || text.slice(0, 100);
+      navItems.push({ navId, kind: 'user', label: String(userIdx + 1), preview });
+      userIdx++;
+    } else if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       for (const b of r.message.content) {
-        if (b.type === 'tool_use' && b.name) counts.set(b.name, (counts.get(b.name) || 0) + 1);
+        if (b.type === 'tool_use' && b.name === 'AskUserQuestion') {
+          const navId = `ask-${askIdx}`;
+          b.__navId = navId;
+          const q = b.input?.questions?.[0]?.question || 'Question';
+          navItems.push({ navId, kind: 'question', label: '?', preview: q.slice(0, 100) });
+          askIdx++;
+        }
       }
     }
   }
-  const el = $('#filters');
-  if (counts.size === 0) { el.hidden = true; el.innerHTML = ''; return; }
-  el.hidden = false;
-  const names = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  el.innerHTML = '<span class="filters-label">Hide:</span>' + names.map(([name, count]) => {
-    const cls = name.toLowerCase().replace(/[^a-z]/g, '');
-    const off = hiddenTools.has(name) ? 'off' : '';
-    return `<button class="filter-pill ${off}" data-tool="${escapeHtml(name)}" data-tool-cls="${cls}">${escapeHtml(name)}<span class="pill-count">${count}</span></button>`;
-  }).join('');
-}
-
-function buildNav() {
-  let idx = 0;
-  userTurns = [];
-  for (const r of records) {
-    if (r.type === 'user' && typeof r.message?.content === 'string') {
-      r.__turnIndex = idx;
-      const text = r.message.content.trim();
-      const preview = text.split(/\r?\n/)[0].slice(0, 100) || text.slice(0, 100);
-      userTurns.push({ index: idx, preview, timestamp: r.timestamp });
-      idx++;
-    }
-  }
-  const html = userTurns.map(t => `
-    <li><a href="#turn-${t.index}" class="nav-item" data-turn-index="${t.index}">
-      <span class="nav-num">${t.index + 1}</span>
-      <span class="nav-preview">${escapeHtml(t.preview)}</span>
+  const html = navItems.map(it => `
+    <li><a href="#${it.navId}" class="nav-item ${it.kind}" data-nav-id="${it.navId}">
+      <span class="nav-num">${escapeHtml(it.label)}</span>
+      <span class="nav-preview">${escapeHtml(it.preview)}</span>
     </a></li>
   `).join('');
   $('#nav-list').innerHTML = html;
-  $('#main').classList.toggle('no-nav', userTurns.length === 0);
+  $('#main').classList.toggle('no-nav', navItems.length === 0);
 }
 
 function updateNavDim(visibleSet, searchActive) {
   document.querySelectorAll('.nav-item').forEach(el => {
-    const idx = Number(el.dataset.turnIndex);
-    const dimmed = searchActive && !visibleSet.has(idx);
+    const id = el.dataset.navId;
+    const dimmed = searchActive && !visibleSet.has(id);
     el.classList.toggle('dimmed', dimmed);
   });
 }
@@ -908,12 +934,12 @@ function updateNavDim(visibleSet, searchActive) {
 function setupScrollSpy() {
   if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
   if (!('IntersectionObserver' in window)) return;
-  const turnEls = Array.from(document.querySelectorAll('.turn[data-turn-index]'));
-  if (turnEls.length === 0) return;
+  const els = Array.from(document.querySelectorAll('[data-nav-id]'));
+  if (els.length === 0) return;
 
-  const setActive = (idx) => {
+  const setActive = (id) => {
     document.querySelectorAll('.nav-item').forEach(el => {
-      const active = Number(el.dataset.turnIndex) === idx;
+      const active = el.dataset.navId === id;
       el.classList.toggle('active', active);
       if (active) {
         const rail = $('#nav-rail');
@@ -928,15 +954,15 @@ function setupScrollSpy() {
 
   scrollObserver = new IntersectionObserver((entries) => {
     entries.forEach(e => { e.target.__intersecting = e.isIntersecting; });
-    for (const el of turnEls) {
+    for (const el of els) {
       if (el.__intersecting) {
-        setActive(Number(el.dataset.turnIndex));
+        setActive(el.dataset.navId);
         return;
       }
     }
   }, { rootMargin: '-110px 0px -60% 0px', threshold: 0 });
 
-  turnEls.forEach(el => scrollObserver.observe(el));
+  els.forEach(el => scrollObserver.observe(el));
 }
 
 function showEmptyState() {
@@ -968,7 +994,6 @@ function loadRecords(text, opts = {}) {
   records = parseJsonl(text);
   toolResults = buildToolResultMap(records);
   buildNav();
-  buildFilters();
   if (opts.persist !== false) persistSession(text);
 
   const lastTitle = [...records].reverse().find(r => r.type === 'ai-title')?.aiTitle;
@@ -1038,25 +1063,29 @@ document.body.addEventListener('drop', async (e) => {
   if (file) loadRecords(await file.text());
 });
 
-$('#toggle-meta').addEventListener('change', render);
 $('#search').addEventListener('input', render);
 
 $('#nav-list').addEventListener('click', (e) => {
   const item = e.target.closest('.nav-item');
   if (!item || item.classList.contains('dimmed')) return;
   e.preventDefault();
-  const idx = item.dataset.turnIndex;
-  const turn = document.querySelector(`.turn[data-turn-index="${idx}"]`);
-  if (turn) turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const id = item.dataset.navId;
+  const target = document.querySelector(`[data-nav-id="${id}"]`);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
-$('#filters').addEventListener('click', (e) => {
-  const pill = e.target.closest('.filter-pill');
-  if (!pill) return;
-  const name = pill.dataset.tool;
-  if (hiddenTools.has(name)) { hiddenTools.delete(name); pill.classList.remove('off'); }
-  else { hiddenTools.add(name); pill.classList.add('off'); }
-  persistHiddenTools();
+function syncViewSegs() {
+  document.querySelectorAll('#view-switcher .seg').forEach(s => {
+    s.classList.toggle('active', s.dataset.view === viewMode);
+  });
+}
+syncViewSegs();
+$('#view-switcher').addEventListener('click', (e) => {
+  const seg = e.target.closest('.seg');
+  if (!seg) return;
+  viewMode = seg.dataset.view;
+  syncViewSegs();
+  try { localStorage.setItem(VIEW_MODE_KEY, viewMode); } catch {}
   render();
 });
 
