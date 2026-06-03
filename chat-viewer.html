@@ -494,8 +494,7 @@ function renderAssistantContent(content) {
     if (block.type === 'text') {
       html += `<div class="text">${renderText(block.text || '')}</div>`;
     } else if (block.type === 'thinking') {
-      const t = block.thinking || block.text || '';
-      html += `<details class="thinking"><summary>Thinking</summary><div class="text">${escapeHtml(t)}</div></details>`;
+      continue;
     } else if (block.type === 'tool_use') {
       const summary = summarizeToolInput(block.name, block.input);
       const inputJson = JSON.stringify(block.input ?? {}, null, 2);
@@ -542,31 +541,17 @@ function renderTurn(r) {
       </div>
     `;
   }
-  if (r.type === 'assistant') {
-    const model = r.message?.model || '';
-    const usage = r.message?.usage;
-    let usageBadge = '';
-    if (usage) {
-      const out = usage.output_tokens ?? 0;
-      const inT = (usage.input_tokens ?? 0)
-        + (usage.cache_creation_input_tokens ?? 0)
-        + (usage.cache_read_input_tokens ?? 0);
-      usageBadge = `<span class="usage-badge" title="input tokens · output tokens">in ${inT.toLocaleString()} · out ${out.toLocaleString()}</span>`;
-    }
-    return `
-      <div class="turn" data-role="assistant">
-        <div class="turn-header">
-          <span class="role assistant">Assistant</span>
-          ${sidechain}
-          <span class="timestamp">${ts}</span>
-          ${model ? `<span class="model-tag">${escapeHtml(model)}</span>` : ''}
-          ${usageBadge}
-        </div>
-        <div class="content assistant-msg">${renderAssistantContent(r.message?.content)}</div>
-      </div>
-    `;
-  }
   return '';
+}
+
+function renderAssistantGroup(records) {
+  const combined = [];
+  for (const a of records) {
+    if (Array.isArray(a.message?.content)) combined.push(...a.message.content);
+  }
+  const inner = renderAssistantContent(combined);
+  if (!inner.trim()) return '';
+  return `<div class="turn" data-role="assistant"><div class="content assistant-msg">${inner}</div></div>`;
 }
 
 function renderMetadataRow(r) {
@@ -605,11 +590,36 @@ function render() {
   const search = $('#search').value.toLowerCase().trim();
   const out = [];
   const visibleTurnIndices = new Set();
+
+  let assistantBuffer = [];
+  const flushAssistant = () => {
+    if (assistantBuffer.length === 0) return;
+    const group = assistantBuffer;
+    assistantBuffer = [];
+    const html = renderAssistantGroup(group);
+    if (!html) return;
+    if (search) {
+      const haystack = (html + ' ' + JSON.stringify(group.map(g => g.message?.content))).toLowerCase();
+      if (!haystack.includes(search)) return;
+    }
+    out.push(html);
+  };
+
   for (const r of records) {
     if (isToolResultOnly(r)) continue;
+
+    if (r.type === 'assistant') {
+      assistantBuffer.push(r);
+      continue;
+    }
+
+    // Skip hidden metadata before flushing, so they don't split assistant groups
+    if (METADATA_TYPES.has(r.type) && !showMeta) continue;
+
+    flushAssistant();
+
     let html;
     if (METADATA_TYPES.has(r.type)) {
-      if (!showMeta) continue;
       html = renderMetadataRow(r);
     } else {
       html = renderTurn(r);
@@ -622,6 +632,8 @@ function render() {
     if (r.__turnIndex != null) visibleTurnIndices.add(r.__turnIndex);
     out.push(html);
   }
+  flushAssistant();
+
   $('#content').innerHTML = out.length
     ? out.join('')
     : `<div class="empty-state"><h2>No matching records</h2><p>Try a different search term or toggle metadata.</p></div>`;
@@ -708,10 +720,21 @@ function showEmptyState() {
   `;
 }
 
-function loadRecords(text) {
+const STORAGE_KEY = 'claude-viewer:last-session-v1';
+
+function persistSession(text) {
+  try { localStorage.setItem(STORAGE_KEY, text); }
+  catch (e) {
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    console.warn('Session too large to persist across reloads:', e);
+  }
+}
+
+function loadRecords(text, opts = {}) {
   records = parseJsonl(text);
   toolResults = buildToolResultMap(records);
   buildNav();
+  if (opts.persist !== false) persistSession(text);
 
   const lastTitle = [...records].reverse().find(r => r.type === 'ai-title')?.aiTitle;
   const firstConv = records.find(r => r.sessionId) || {};
@@ -792,7 +815,14 @@ $('#nav-list').addEventListener('click', (e) => {
   if (turn) turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
-showEmptyState();
+// Restore previously viewed session on page load
+try {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) loadRecords(saved, { persist: false });
+  else showEmptyState();
+} catch {
+  showEmptyState();
+}
 </script>
 </body>
 </html>
