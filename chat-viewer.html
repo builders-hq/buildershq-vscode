@@ -1178,7 +1178,10 @@ $('#nav-list').addEventListener('click', (e) => {
   if (!item || item.classList.contains('dimmed')) return;
   e.preventDefault();
   const id = item.dataset.navId;
-  const target = document.querySelector(`[data-nav-id="${id}"]`);
+  document.querySelectorAll('.nav-item').forEach((el) => {
+    el.classList.toggle('active', el === item);
+  });
+  const target = document.getElementById(id);
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
