@@ -930,7 +930,7 @@ function setupScrollSpy() {
     window.removeEventListener('resize', scrollObserver);
     scrollObserver = null;
   }
-  const els = Array.from(document.querySelectorAll('[data-nav-id]'));
+  const els = Array.from(document.querySelectorAll('#content [data-nav-id]'));
   if (els.length === 0) return;
 
   const setActive = (id) => {
